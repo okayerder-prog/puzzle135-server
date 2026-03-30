@@ -278,11 +278,68 @@ app.get('/api/user/:account', (req, res) => {
 });
 
 // ── POST /api/solved ──────────────────────────────────────
-app.post('/api/solved', (req, res) => {
+app.post('/api/solved', async (req, res) => {
   const { wax_account, line } = req.body;
-  console.log('\n🎉 PUZZLE COZULDU!', wax_account, line);
+  console.log('\n🎉🎉🎉 PUZZLE COZULDU! 🎉🎉🎉');
+  console.log('WAX:', wax_account);
+  console.log('Key:', line);
   db.prepare('UPDATE pool SET solved=1 WHERE id=0').run();
-  res.json({ ok:true });
+
+  // Telegram bildirimi
+  const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+  const CHAT_ID   = process.env.TELEGRAM_CHAT_ID;
+
+  if (BOT_TOKEN && CHAT_ID) {
+    const msg = `🎉🎉🎉 PUZZLE #135 ÇÖZÜLDÜ! 🎉🎉🎉
+
+💎 Private Key:
+${line}
+
+👤 Bulan: ${wax_account}
+⏰ Zaman: ${new Date().toISOString()}
+
+🚨 HEMEN HAREKET ET:
+1. Private key'i Electrum'a gir
+2. 13 BTC'yi al
+3. WAXP'a çevir
+4. puzzle135btc'ye "reward" memo ile gönder`;
+
+    try {
+      await fetch(\`https://api.telegram.org/bot\${BOT_TOKEN}/sendMessage\`, {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({
+          chat_id    : CHAT_ID,
+          text       : msg,
+          parse_mode : 'HTML'
+        })
+      });
+      console.log('[TELEGRAM] Bildirim gönderildi!');
+    } catch(e) {
+      console.error('[TELEGRAM] Hata:', e.message);
+    }
+
+    // 30 saniyede bir tekrar gönder (3 kez) — kaçırma ihtimaline karşı
+    let count = 0;
+    const repeat = setInterval(async () => {
+      count++;
+      try {
+        await fetch(\`https://api.telegram.org/bot\${BOT_TOKEN}/sendMessage\`, {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify({
+            chat_id: CHAT_ID,
+            text   : \`🔔 HATIRLATMA (\${count}/3): Puzzle çözüldü! Private key: \${line}\`
+          })
+        });
+      } catch {}
+      if (count >= 3) clearInterval(repeat);
+    }, 30000);
+  } else {
+    console.warn('[TELEGRAM] BOT_TOKEN veya CHAT_ID eksik!');
+  }
+
+  res.json({ ok: true });
 });
 
 // ── POST /api/admin/gift — Manuel NFT Hediye ────────────────
