@@ -611,17 +611,35 @@ app.get('/api/download/worker', (req, res) => {
     ? 'puzzle135-cuda-worker.py'
     : 'puzzle135-vulkan-worker.py';
 
-  // Railway'de index.js /app/ içinde, dosyalar da /app/ içinde
-  const srcFile  = gpuType === 'cuda'
-    ? path.join(__dirname, 'cuda_worker.py')
-    : path.join(__dirname, 'vulkan_worker.py');
+  // Dosya yollarını teker teker dene
+  const cwd = process.cwd();
+  const possiblePaths = gpuType === 'cuda'
+    ? [
+        path.join(cwd, 'cuda_worker.py'),
+        path.join(__dirname, 'cuda_worker.py'),
+        path.join(__dirname, '../cuda_worker.py'),
+        path.join(cwd, 'workers/cuda_worker.py'),
+        path.join(cwd, 'workers/src/cuda_worker.py'),
+        '/app/cuda_worker.py',
+      ]
+    : [
+        path.join(cwd, 'vulkan_worker.py'),
+        path.join(__dirname, 'vulkan_worker.py'),
+        path.join(__dirname, '../vulkan_worker.py'),
+        path.join(cwd, 'workers/vulkan_worker.py'),
+        path.join(cwd, 'workers/src/vulkan_worker.py'),
+        '/app/vulkan_worker.py',
+      ];
+
+  const srcFile = possiblePaths.find(p => fs.existsSync(p));
+  console.log('[WORKER] Looking for:', possiblePaths[0], '| Found:', srcFile || 'NONE');
 
   // Kaynak dosya yoksa basit fallback
-  if (!require('fs').existsSync(srcFile)) {
+  if (!srcFile) {
     return res.status(404).json({ error: 'Worker file not found on server' });
   }
 
-  let src = require('fs').readFileSync(srcFile, 'utf8');
+  let src = fs.readFileSync(srcFile, 'utf8');
   src = src.replace('__WAX_ACCOUNT__', wax)
            .replace('__POOL_URL__', POOL_URL || process.env.POOL_URL || '');
 
