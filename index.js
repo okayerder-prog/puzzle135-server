@@ -259,6 +259,7 @@ app.use(express.static(path.join(__dirname, '../public'), {
 // ── ORTAM DEĞİŞKENLERİ ────────────────────────────────────
 const PORT           = process.env.PORT           || 3000;
 const CONTRACT_NAME  = process.env.CONTRACT_NAME  || 'puzzle135btc';
+const POOL_URL       = process.env.POOL_URL        || '';
 const ADMIN_ACCOUNT  = process.env.ADMIN_ACCOUNT  || 'puzzle135btc';
 const ADMIN_KEY      = process.env.ADMIN_KEY      || 'changeme';      // Admin panel şifresi
 const ADMIN_PRIVKEY  = process.env.ADMIN_PRIVATE_KEY;
@@ -603,6 +604,7 @@ app.post('/api/solved', (req, res) => {
 // Worker kaynak dosyaları sunucuda hazır olmalı
 // WAX hesabı inject edilerek Python dosyası olarak sunulur
 app.get('/api/download/worker', (req, res) => {
+  try {
   const { wax, type } = req.query;
   if (!wax) return res.status(400).json({ error: 'wax account required' });
 
@@ -641,11 +643,15 @@ app.get('/api/download/worker', (req, res) => {
 
   let src = fs.readFileSync(srcFile, 'utf8');
   src = src.replace('__WAX_ACCOUNT__', wax)
-           .replace('__POOL_URL__', POOL_URL || process.env.POOL_URL || '');
+           .replace('__POOL_URL__', process.env.POOL_URL || '');
 
   res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
   res.setHeader('Content-Type', 'text/plain');
   res.send(src);
+  } catch(err) {
+    console.error('[WORKER ERROR]', err.message, err.stack);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─────────────────────────────────────────────────────────
