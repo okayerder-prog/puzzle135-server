@@ -611,10 +611,10 @@ app.get('/api/download/worker', (req, res) => {
     ? 'puzzle135-cuda-worker.py'
     : 'puzzle135-vulkan-worker.py';
 
-  // Railway'de dosyalar root'ta duruyor
+  // Railway'de index.js /app/ içinde, dosyalar da /app/ içinde
   const srcFile  = gpuType === 'cuda'
-    ? path.join(__dirname, '../cuda_worker.py')
-    : path.join(__dirname, '../vulkan_worker.py');
+    ? path.join(__dirname, 'cuda_worker.py')
+    : path.join(__dirname, 'vulkan_worker.py');
 
   // Kaynak dosya yoksa basit fallback
   if (!require('fs').existsSync(srcFile)) {
