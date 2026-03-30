@@ -56,26 +56,57 @@ def find_kangaroo():
     return None
 
 def install_kangaroo():
-    """Kangaroo yoksa kurulum talimatı ver"""
-    print(f"\n{RE}[✗] Kangaroo bulunamadı!{R}")
-    print(f"\n{Y}Kurulum seçenekleri:{R}")
-    print(f"""
-  {BD}1. Otomatik (Rust gerekir):{R}
-     cargo install kangaroo
+    """Rust + kangaroo otomatik kur"""
+    print(f"\n{Y}[i] Kangaroo bulunamadı. Otomatik kuruluyor...{R}")
+    print(f"{Y}    Bu işlem 5-10 dakika sürer, bir kez yapılır.{R}\n")
 
-  {BD}2. Windows için kurulum scripti:{R}
-     PUZZLE135-GPU-Setup.bat dosyasını çalıştır
-     (Rust + kangaroo otomatik kurulur)
+    cargo_bin = os.path.expanduser("~/.cargo/bin")
+    cargo_exe = os.path.join(cargo_bin, "cargo.exe" if IS_WIN else "cargo")
 
-  {BD}3. Arch Linux:{R}
-     paru -S kangaroo
+    # 1. Rust kurulu mu?
+    if not os.path.exists(cargo_exe):
+        print(f"{Y}[1/2] Rust indiriliyor...{R}")
+        try:
+            if IS_WIN:
+                rustup_url = "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe"
+                rustup_path = os.path.join(os.environ.get("TEMP", "."), "rustup-init.exe")
+                urllib.request.urlretrieve(rustup_url, rustup_path)
+                print(f"{Y}[1/2] Rust kuruluyor (sessiz mod)...{R}")
+                subprocess.run([rustup_path, "-y", "--default-toolchain", "stable",
+                               "--profile", "minimal"], check=True)
+                os.remove(rustup_path)
+            else:
+                subprocess.run(
+                    'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal',
+                    shell=True, check=True
+                )
+            # PATH güncelle
+            os.environ["PATH"] = cargo_bin + os.pathsep + os.environ.get("PATH", "")
+            print(f"{G}[✓] Rust kuruldu.{R}")
+        except Exception as e:
+            print(f"{RE}[✗] Rust kurulamadı: {e}{R}")
+            return False
 
-  {BD}4. Kaynak koddan:{R}
-     git clone https://github.com/oritwoen/kangaroo
-     cd kangaroo
-     cargo build --release
-""")
-    return False
+    # PATH güncelle
+    os.environ["PATH"] = cargo_bin + os.pathsep + os.environ.get("PATH", "")
+
+    # 2. Default toolchain ayarla
+    rustup_exe = os.path.join(cargo_bin, "rustup.exe" if IS_WIN else "rustup")
+    try:
+        subprocess.run([rustup_exe, "default", "stable"], check=True)
+        print(f"{G}[✓] Rust toolchain ayarlandı.{R}")
+    except Exception as e:
+        print(f"{Y}[!] Toolchain ayarlanamadı: {e}{R}")
+
+    # 3. Kangaroo kur
+    print(f"\n{Y}[2/2] Kangaroo GPU kuruluyor...{R}")
+    try:
+        subprocess.run([cargo_exe, "install", "kangaroo"], check=True)
+        print(f"{G}[✓] Kangaroo GPU kuruldu!{R}")
+        return True
+    except Exception as e:
+        print(f"{RE}[✗] Kangaroo kurulamadı: {e}{R}")
+        return False
 
 # ── POOL REPORTER ─────────────────────────────────────────
 _lock=threading.Lock(); _pending=0; _total=0; _speed=0.0; _nfts=0; _start=time.time()
@@ -255,9 +286,15 @@ def main():
 
     kangaroo_bin = find_kangaroo()
     if not kangaroo_bin:
-        install_kangaroo()
-        input(f"\n{Y}Kurulumdan sonra tekrar çalıştır. Enter'a bas...{R}")
-        sys.exit(1)
+        success = install_kangaroo()
+        if success:
+            # Kurulum bitti, tekrar bul
+            kangaroo_bin = find_kangaroo()
+        if not kangaroo_bin:
+            print(f"\n{RE}[✗] Kangaroo bulunamadı. Lütfen manuel kur:{R}")
+            print(f"{Y}    cargo install kangaroo{R}")
+            input(f"\n{Y}Enter'a bas...{R}")
+            sys.exit(1)
 
     print(f"{G}[✓] Kangaroo bulundu: {kangaroo_bin}{R}\n")
 
