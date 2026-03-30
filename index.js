@@ -416,6 +416,75 @@ app.get('/api/download/setup', (req, res) => {
   res.send(bat);
 });
 
+// ── POST /api/ai — Anthropic Proxy ───────────────────────
+// Rate limit: IP başına günlük 4 istek
+const aiUsage = new Map(); // ip → { count, date }
+
+function getAIRemaining(ip) {
+  const today = new Date().toDateString();
+  const entry = aiUsage.get(ip);
+  if (!entry || entry.date !== today) return 4;
+  return Math.max(0, 4 - entry.count);
+}
+
+function incAIUsage(ip) {
+  const today = new Date().toDateString();
+  const entry = aiUsage.get(ip) || { count: 0, date: today };
+  if (entry.date !== today) { entry.count = 0; entry.date = today; }
+  entry.count++;
+  aiUsage.set(ip, entry);
+}
+
+app.post('/api/ai', async (req, res) => {
+  const ip = req.ip;
+  const remaining = getAIRemaining(ip);
+
+  if (remaining <= 0) {
+    return res.status(429).json({ error: 'Daily limit reached. Try again tomorrow.' });
+  }
+
+  const { messages, system } = req.body;
+  if (!messages || !Array.isArray(messages)) {
+    return res.status(400).json({ error: 'messages required' });
+  }
+
+  const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+  if (!ANTHROPIC_KEY) {
+    return res.status(500).json({ error: 'AI not configured' });
+  }
+
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type'      : 'application/json',
+        'x-api-key'         : ANTHROPIC_KEY,
+        'anthropic-version' : '2023-06-01'
+      },
+      body: JSON.stringify({
+        model     : 'claude-haiku-4-5-20251001',
+        max_tokens: 500,
+        system    : system || '',
+        messages  : messages.slice(-10) // son 10 mesaj
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return res.status(500).json({ error: data.error?.message || 'AI error' });
+    }
+
+    incAIUsage(ip);
+    res.json({
+      content  : data.content,
+      remaining: getAIRemaining(ip)
+    });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── STATIC ────────────────────────────────────────────────
 const publicDir = path.join(process.cwd(), 'public');
 if (fs.existsSync(publicDir)) app.use(express.static(publicDir));
