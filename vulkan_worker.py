@@ -235,11 +235,11 @@ def run(kangaroo_bin):
                 status(val,_total,_nfts,time.time()-_start)
                 continue
 
-            # Çözüm bulundu
+            # Çözüm bulundu — sadece hex private key içeren satır
             ll=line.lower()
-            if any(k in ll for k in ["found","private","key:","solved","0x"]):
-                if any(c in line for c in ["0x","Found"]) or "key" in ll:
-                    cozuldu(line); continue
+            # Gerçek çözüm: "Found key: 0x..." veya "key = 0x..." formatı
+            if re.search(r"(?:found key|key found|private key|result)[\s:=]+0x[0-9a-f]{20,}", ll):
+                cozuldu(line); continue
 
             # Bilgi satırları
             if any(k in ll for k in ["gpu","vulkan","dx12","metal","error","device","backend","ops","dp"]):
