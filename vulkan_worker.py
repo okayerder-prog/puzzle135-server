@@ -1,338 +1,376 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-PUZZLE135 — Vulkan Worker v2.0
-Bitcoin Puzzle #135 Pool Client
-AMD / Intel GPU — CUDA gerekmez
-"""
+'use strict';
 
-import os, sys, time, json, threading, subprocess, platform
-import urllib.request, urllib.error, re, io
+// ============================================================
+//  PUZZLE135 — Pool Server  v4.0
+//  npm install express better-sqlite3 eosjs node-fetch@2 dotenv cors
+// ============================================================
 
-# ── CONFIG (sunucu tarafından inject edilir) ───────────────
-WAX_ACCOUNT     = "__WAX_ACCOUNT__"
-POOL_URL        = "__POOL_URL__"
-GPU_TYPE        = "vulkan"
-VERSION         = "2.0.0"
-PUBKEY          = "02145d2611c823a396ef6712ce0f712f09b9b4f3135e3e0aa3230fb9b6d08d1e16"
-RANGE_START     = "4000000000000000000000000000000000"
-RANGE_END       = "7fffffffffffffffffffffffffffffffff"
-REPORT_SECS     = 30
-NFT_THRESHOLD   = 10000
+const express  = require('express');
+const path     = require('path');
+const fs       = require('fs');
+const crypto   = require('crypto');
+require('dotenv').config();
 
-# ── RENKLER ───────────────────────────────────────────────
-IS_WIN = platform.system() == "Windows"
-if IS_WIN:
-    os.system("color")
-
-R  = "\033[0m"
-G  = "\033[92m"
-Y  = "\033[93m"
-RE = "\033[91m"
-C  = "\033[96m"
-M  = "\033[95m"
-W  = "\033[97m"
-BD = "\033[1m"
-
-# ── KANGAROO ──────────────────────────────────────────────
-BIN = "kangaroo.exe" if IS_WIN else "kangaroo"
-
-DOWNLOAD_URLS = {
-    "Windows": "https://github.com/JeanLucPons/Kangaroo/releases/download/1.0/Kangaroo.exe",
-    "Linux"  : "https://github.com/JeanLucPons/Kangaroo/releases/download/1.0/kangaroo",
+let Api, JsonRpc, JsSignatureProvider, fetch, Database;
+try {
+  ({ Api, JsonRpc }        = require('eosjs'));
+  ({ JsSignatureProvider } = require('eosjs/dist/eosjs-jssig'));
+  fetch                    = require('node-fetch');
+  Database                 = require('better-sqlite3');
+} catch (e) {
+  console.error('Missing deps. Run: npm install');
+  process.exit(1);
 }
 
-def banner():
-    os.system("cls" if IS_WIN else "clear")
-    print(f"""
-{M}{'='*62}{R}
-{BD}  PUZZLE135  Vulkan Worker  v{VERSION}{R}
-{M}{'─'*62}{R}
-{C}  WAX  : {BD}{W}{WAX_ACCOUNT}{R}
-{C}  Pool : {W}{POOL_URL}{R}
-{C}  GPU  : {M}AMD / Intel Vulkan{R}
-{M}{'─'*62}{R}
-{G}  Her {NFT_THRESHOLD:,} Bkeys = 1 NFT  →  ibdak.c.wam'a mint edilir{R}
-{M}{'='*62}{R}
-""")
+const PORT          = process.env.PORT           || 3000;
+const CONTRACT      = process.env.CONTRACT_NAME  || 'puzzle135btc';
+const ADMIN_ACCOUNT = process.env.ADMIN_ACCOUNT  || 'puzzle135btc';
+const ADMIN_KEY     = process.env.ADMIN_KEY      || 'changeme';
+const ADMIN_PRIVKEY = process.env.ADMIN_PRIVATE_KEY || '';
+const POOL_URL      = process.env.POOL_URL       || '';
+const NFT_THRESHOLD = 10000;
 
-# ── KANGaROO İNDİR ────────────────────────────────────────
-def download_kangaroo():
-    if os.path.exists(BIN):
-        print(f"{G}[✓] Kangaroo mevcut: {BIN}{R}")
-        return True
-    url = DOWNLOAD_URLS.get(platform.system())
-    if not url:
-        print(f"{RE}[✗] Bu OS desteklenmiyor.{R}")
-        return False
-    print(f"{Y}[↓] Kangaroo indiriliyor...{R}")
-    try:
-        done = [False]
-        def prog(b, bs, total):
-            if total > 0 and not done[0]:
-                pct = min(100, b*bs*100//total)
-                bar = "█"*(pct//4) + "░"*(25-pct//4)
-                sys.stdout.write(f"\r    [{bar}] {pct}%  ")
-                sys.stdout.flush()
-                if pct >= 100: done[0] = True
-        urllib.request.urlretrieve(url, BIN, reporthook=prog)
-        print(f"\n{G}[✓] İndirildi: {BIN}{R}")
-        if not IS_WIN:
-            os.chmod(BIN, 0o755)
-        return True
-    except Exception as e:
-        print(f"\n{RE}[✗] İndirme hatası: {e}{R}")
-        print(f"{Y}    Manuel indir: {url}{R}")
-        return False
+const rpc = new JsonRpc('https://wax.greymass.com', { fetch });
+const api = ADMIN_PRIVKEY ? new Api({
+  rpc,
+  signatureProvider: new JsSignatureProvider([ADMIN_PRIVKEY]),
+  textDecoder: new TextDecoder(),
+  textEncoder: new TextEncoder()
+}) : null;
 
-# ── POOL REPORTER ─────────────────────────────────────────
-_lock          = threading.Lock()
-_bkeys_pending = 0
-_total_bkeys   = 0
-_speed         = 0.0
-_nfts          = 0
-_start         = time.time()
+const db = new Database(path.join(process.cwd(), 'puzzle135.db'));
+db.exec(`
+  CREATE TABLE IF NOT EXISTS contributors (
+    wax_account TEXT PRIMARY KEY,
+    bkeys_total INTEGER DEFAULT 0,
+    nfts_minted INTEGER DEFAULT 0,
+    last_seen   INTEGER DEFAULT 0,
+    gpu_type    TEXT DEFAULT 'unknown'
+  );
+  CREATE TABLE IF NOT EXISTS pool (
+    id INTEGER PRIMARY KEY DEFAULT 0,
+    total_bkeys INTEGER DEFAULT 0,
+    total_nfts  INTEGER DEFAULT 0,
+    solved      INTEGER DEFAULT 0
+  );
+  CREATE TABLE IF NOT EXISTS mint_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    wax_account TEXT,
+    bkeys INTEGER,
+    nfts INTEGER,
+    tx_id TEXT,
+    ts INTEGER
+  );
+  INSERT OR IGNORE INTO pool (id) VALUES (0);
+`);
 
-def reporter():
-    global _bkeys_pending, _nfts
-    while True:
-        time.sleep(REPORT_SECS)
-        with _lock:
-            bk = _bkeys_pending
-            _bkeys_pending = 0
-        if bk <= 0:
-            continue
-        try:
-            data = json.dumps({
-                "wax_account" : WAX_ACCOUNT,
-                "bkeys"       : bk,
-                "gpu_type"    : GPU_TYPE,
-                "speed_mkeys" : round(_speed, 2),
-                "version"     : VERSION
-            }).encode()
-            req = urllib.request.Request(
-                f"{POOL_URL}/api/report",
-                data=data, method="POST",
-                headers={"Content-Type": "application/json"}
-            )
-            with urllib.request.urlopen(req, timeout=15) as r:
-                resp = json.loads(r.read())
-            _nfts    = resp.get("user_total_nfts", _nfts)
-            new_nfts = resp.get("new_nfts_minted", 0)
-            until    = resp.get("bkeys_until_next_nft", NFT_THRESHOLD)
-            msg = f"\n{G}[✓] Rapor gönderildi → {bk:,} Bkeys"
-            if new_nfts > 0:
-                msg += f" | {G}{BD}+{new_nfts} NFT MINT!{R}"
-            msg += f" | Toplam NFT: {_nfts} | Sonraki: {until:,} Bkeys{R}"
-            print(msg)
-        except Exception as e:
-            print(f"\n{Y}[!] Rapor gönderilemedi: {e}{R}")
+const getContrib  = db.prepare('SELECT * FROM contributors WHERE wax_account = ?');
+const saveContrib = db.prepare(`
+  INSERT INTO contributors (wax_account,bkeys_total,nfts_minted,last_seen,gpu_type)
+  VALUES (@wax_account,@bkeys_total,@nfts_minted,@last_seen,@gpu_type)
+  ON CONFLICT(wax_account) DO UPDATE SET
+    bkeys_total=@bkeys_total,nfts_minted=@nfts_minted,
+    last_seen=@last_seen,gpu_type=@gpu_type
+`);
+const getPool    = db.prepare('SELECT * FROM pool WHERE id = 0');
+const updatePool = db.prepare('UPDATE pool SET total_bkeys=?,total_nfts=? WHERE id=0');
+const addLog     = db.prepare('INSERT INTO mint_log(wax_account,bkeys,nfts,tx_id,ts) VALUES(?,?,?,?,?)');
 
-# ── HIZLANDIRILMIŞ ÇIKTI OKUMA ────────────────────────────
-def time_per_nft(speed):
-    if speed <= 0: return "—"
-    secs = (NFT_THRESHOLD * 1000) / speed
-    if secs < 60:   return f"{int(secs)}s"
-    if secs < 3600: return f"{secs/60:.1f}m"
-    return f"{secs/3600:.1f}h"
+const heartbeat = {};
+const sessions  = new Map();
+const failedLogins = new Map();
 
-def nfts_per_day(speed):
-    if speed <= 0: return 0
-    return (speed * 86400) / (NFT_THRESHOLD * 1000)
+const app = express();
+app.use(require('cors')());
+app.use(express.json());
 
-def status(speed, bk_total, nfts, elapsed):
-    bar_w  = 24
-    filled = min(bar_w, int(speed / 50))
-    bar    = "█"*filled + "░"*(bar_w-filled)
-    h      = int(elapsed)//3600
-    m      = (int(elapsed)%3600)//60
-    s      = int(elapsed)%60
-    bk_str = f"{bk_total/1e6:.1f}M" if bk_total >= 1e6 else f"{bk_total//1000}K"
-    npd    = nfts_per_day(speed)
-    nxt    = time_per_nft(speed)
-    rate   = f"{npd:.1f}/day" if npd >= 1 else f"1/{nxt}"
-    sys.stdout.write(
-        f"\r{M}[⚡]{R} {speed:6.1f} Mkeys/s "
-        f"{C}[{bar}]{R} "
-        f"NFT:{G}{nfts}{R}({Y}{rate}{R}) "
-        f"Next:{G}{nxt}{R} "
-        f"Bkeys:{W}{bk_str}{R} "
-        f"{Y}{h:02d}:{m:02d}:{s:02d}{R}   "
-    )
-    sys.stdout.flush()
+// Cookie parser
+app.use((req, res, next) => {
+  req.cookies = {};
+  const h = req.headers.cookie;
+  if (h) h.split(';').forEach(c => {
+    const [k, ...v] = c.trim().split('=');
+    if (k) req.cookies[k.trim()] = v.join('=').trim();
+  });
+  next();
+});
 
-# ── KANGAROO ÇALIŞTIR ─────────────────────────────────────
-def run_kangaroo():
-    global _bkeys_pending, _total_bkeys, _speed
+function checkSession(req) {
+  const token = req.cookies.admin_session;
+  if (!token) return false;
+  const s = sessions.get(token);
+  if (!s || Date.now() > s.expiresAt) { sessions.delete(token); return false; }
+  return true;
+}
 
-    # Puzzle dosyası — JeanLucPons formatı
-    with open("puzzle135.txt", "w") as f:
-        f.write(f"{RANGE_START}\n{RANGE_END}\n{PUBKEY}\n")
-    print(f"{G}[✓] puzzle135.txt oluşturuldu.{R}")
+// ── ADMIN LOGIN PAGE ──────────────────────────────────────
+app.get('/admin-login', (req, res) => {
+  if (checkSession(req)) return res.redirect('/admin');
+  res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+<title>Admin - PUZZLE135</title>
+<style>*{box-sizing:border-box;margin:0;padding:0}
+body{background:#030712;color:#e2e8f0;font-family:system-ui,sans-serif;
+min-height:100vh;display:flex;align-items:center;justify-content:center}
+.c{background:#0f172a;border:1px solid #1e293b;border-radius:16px;padding:2.5rem;width:360px;text-align:center}
+h1{color:#f7c948;font-size:1.2rem;margin-bottom:.5rem}p{color:#64748b;font-size:.82rem;margin-bottom:2rem}
+input{width:100%;background:#1e293b;border:1px solid #334155;color:#e2e8f0;
+padding:.8rem 1rem;border-radius:8px;font-size:1rem;outline:none;margin-bottom:1rem;letter-spacing:.15em}
+input:focus{border-color:#f7c948}
+button{width:100%;background:#f7c948;color:#030712;border:none;padding:.85rem;
+border-radius:8px;font-weight:700;font-size:1rem;cursor:pointer}
+button:hover{opacity:.88}button:disabled{opacity:.5}
+.err{color:#f87171;font-size:.82rem;margin-top:.8rem;display:none}</style></head>
+<body><div class="c"><h1>PUZZLE135 Admin</h1><p>Authorized access only</p>
+<input type="password" id="pw" placeholder="Password" onkeydown="if(event.key==='Enter')login()">
+<button onclick="login()" id="btn">Login</button>
+<div class="err" id="err"></div></div>
+<script>async function login(){
+const pw=document.getElementById('pw').value.trim();if(!pw)return;
+const btn=document.getElementById('btn'),err=document.getElementById('err');
+btn.disabled=true;btn.textContent='...';err.style.display='none';
+try{const r=await fetch('/api/admin/login',{method:'POST',
+headers:{'Content-Type':'application/json'},body:JSON.stringify({key:pw})});
+const d=await r.json();
+if(d.ok)window.location.href='/admin';
+else{err.textContent=d.error||'Wrong password';err.style.display='block';}
+}catch(e){err.textContent='Server error';err.style.display='block';}
+btn.disabled=false;btn.textContent='Login';}</script></body></html>`);
+});
 
-    cmd = ([BIN] if IS_WIN else [f"./{BIN}"]) + ["puzzle135.txt"]
-    print(f"\n{C}[►] Başlatılıyor: {' '.join(cmd)}{R}")
-    print(f"{Y}    Kangaroo ayrı pencerede açılıyor...{R}\n")
+// ── ADMIN PANEL ───────────────────────────────────────────
+app.get('/admin', (req, res) => {
+  if (!checkSession(req)) return res.redirect('/admin-login');
+  const f = path.join(process.cwd(), 'admin.html');
+  if (fs.existsSync(f)) return res.sendFile(f);
+  res.send('<h2 style="color:#f7c948;font-family:monospace;padding:2rem">admin.html not found in ' + process.cwd() + '</h2>');
+});
 
-    try:
-        if IS_WIN:
-            # Windows: yeni CMD penceresinde aç — çıktı görünür
-            proc = subprocess.Popen(
-                ["cmd", "/c", "start", "cmd", "/k"] + cmd,
-                close_fds=True
-            )
-        else:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT
-            )
-    except FileNotFoundError:
-        print(f"{RE}[✗] {BIN} bulunamadı!{R}")
-        return
+app.get('/admin.html', (req, res) => res.redirect('/admin-login'));
 
-    if IS_WIN:
-        # Windows'ta Kangaroo ayrı pencerede — biz sadece hızı tahmin ederiz
-        print(f"{G}[✓] Kangaroo başlatıldı — yeni pencerede çalışıyor.{R}")
-        print(f"{G}[✓] Bu pencere pool raporlarını göndermeye devam ediyor.{R}\n")
+// ── POST /api/admin/login ─────────────────────────────────
+app.post('/api/admin/login', (req, res) => {
+  const ip   = req.ip;
+  const fail = failedLogins.get(ip) || { count: 0, bannedUntil: 0 };
 
-        # Hız tahmini: integrated GPU için ~20 Mkeys/s
-        ESTIMATED_SPEED = 20.0
-        print(f"{Y}[i] Tahmini hız: {ESTIMATED_SPEED} Mkeys/s (integrated GPU){R}")
-        print(f"{Y}[i] Her 30 saniyede pool'a rapor gönderilecek.{R}\n")
+  if (fail.bannedUntil > Date.now()) {
+    const mins = Math.ceil((fail.bannedUntil - Date.now()) / 60000);
+    return res.status(429).json({ ok: false, error: `Too many attempts. Wait ${mins} min.` });
+  }
 
-        while True:
-            time.sleep(1)
-            with _lock:
-                _bkeys_pending += int(ESTIMATED_SPEED * 1)
-                _total_bkeys   += int(ESTIMATED_SPEED * 1)
-            _speed = ESTIMATED_SPEED
-            elapsed = time.time() - _start
-            status(ESTIMATED_SPEED, _total_bkeys, _nfts, elapsed)
+  const { key } = req.body;
+  if (!key || key !== ADMIN_KEY) {
+    fail.count++;
+    if (fail.count >= 5) { fail.bannedUntil = Date.now() + 15*60*1000; fail.count = 0; }
+    failedLogins.set(ip, fail);
+    return setTimeout(() => res.status(401).json({ ok:false, error:'Wrong password' }), 1200);
+  }
 
-            # Kangaroo kapandıysa dur
-            if proc.poll() is not None:
-                print(f"\n{Y}[!] Kangaroo sona erdi.{R}")
-                break
-    else:
-        # Linux: normal pipe okuma
-        buf = b""
-        while True:
-            ch = proc.stdout.read(1)
-            if not ch:
-                break
-            if ch in (b'\r', b'\n'):
-                if not buf:
-                    continue
-                try:
-                    line = buf.decode('utf-8', errors='replace').strip()
-                except:
-                    line = ""
-                buf = b""
-                if not line:
-                    continue
-                m = re.search(r'\[([\d.]+)\s*([MBGKk])Key/s\]', line, re.I)
-                if m:
-                    val = float(m.group(1))
-                    unit = m.group(2).upper()
-                    if unit == 'K': val /= 1000
-                    elif unit == 'B': val *= 1000
-                    elif unit == 'G': val *= 1_000_000
-                    _speed = val
-                    bk = int(val * 1)
-                    with _lock:
-                        _bkeys_pending += bk
-                        _total_bkeys   += bk
-                    status(val, _total_bkeys, _nfts, time.time()-_start)
-                    continue
-                ll = line.lower()
-                if any(k in ll for k in ["priv", "pkey", "key found", "solved"]):
-                    solved(line)
-                if any(k in ll for k in ["start:", "stop:", "error", "dp size"]):
-                    print(f"\n{Y}[i] {line}{R}")
-            else:
-                buf += ch
-        proc.wait()
-        print(f"\n{Y}[!] Kangaroo sona erdi (kod: {proc.returncode}).{R}")
+  failedLogins.delete(ip);
+  const token = crypto.randomBytes(48).toString('hex');
+  sessions.set(token, { expiresAt: Date.now() + 8*3600*1000 });
+  res.setHeader('Set-Cookie', `admin_session=${token}; HttpOnly; SameSite=Strict; Max-Age=${8*3600}; Path=/`);
+  res.json({ ok: true });
+});
 
-def solved(line):
-    print(f"\n\n{G}{'★'*60}{R}")
-    print(f"{BD}{G}  🎉 PUZZLE #135 ÇÖZÜLDÜ! 🎉{R}")
-    print(f"{G}  {line}{R}")
-    print(f"{G}{'★'*60}{R}\n")
-    try:
-        data = json.dumps({"wax_account":WAX_ACCOUNT,"line":line,"gpu_type":GPU_TYPE}).encode()
-        req  = urllib.request.Request(f"{POOL_URL}/api/solved", data=data,
-               method="POST", headers={"Content-Type":"application/json"})
-        urllib.request.urlopen(req, timeout=10)
-        print(f"{G}[✓] Pool'a bildirildi!{R}")
-    except Exception as e:
-        print(f"{RE}[!] Bildirim gönderilemedi: {e}{R}")
-        print(f"{Y}    Private key'i sakla: {line}{R}")
-    input(f"\n{Y}Enter'a bas...{R}")
+// Admin API middleware
+app.use('/api/admin', (req, res, next) => {
+  if (req.path === '/login') return next();
+  if (!checkSession(req)) return res.status(401).json({ error:'Not authenticated' });
+  next();
+});
 
-# ── GPU KONTROL ────────────────────────────────────────────
-def check_gpu():
-    print(f"{C}[i] GPU kontrol ediliyor...{R}")
-    try:
-        r = subprocess.run(["vulkaninfo","--summary"], capture_output=True, text=True, timeout=5)
-        if r.returncode == 0:
-            for ln in r.stdout.split('\n'):
-                if 'deviceName' in ln or 'deviceType' in ln:
-                    print(f"{G}[✓] Vulkan GPU: {ln.strip()}{R}")
-                    break
-        else:
-            print(f"{Y}[!] vulkaninfo bulunamadı, devam ediliyor...{R}")
-    except:
-        print(f"{Y}[!] GPU doğrulama atlandı.{R}")
+// ── POST /api/report ──────────────────────────────────────
+app.post('/api/report', async (req, res) => {
+  const { wax_account, bkeys, gpu_type = 'unknown' } = req.body;
+  if (!wax_account || typeof wax_account !== 'string')
+    return res.status(400).json({ error: 'wax_account required' });
+  if (!bkeys || typeof bkeys !== 'number' || bkeys <= 0 || bkeys > 50000)
+    return res.status(400).json({ error: 'bkeys must be 1-50000' });
 
-# ── POOL KONTROL ───────────────────────────────────────────
-def check_pool():
-    print(f"{C}[i] Pool kontrol ediliyor: {POOL_URL}{R}")
-    try:
-        with urllib.request.urlopen(f"{POOL_URL}/api/stats", timeout=10) as r:
-            d = json.loads(r.read())
-            print(f"{G}[✓] Pool OK  |  NFT: {d.get('total_nfts',0)}  |  Worker: {d.get('active_workers',0)}{R}")
-            return True
-    except Exception as e:
-        print(f"{Y}[!] Pool bağlantısı kurulamadı: {e}{R}")
-        print(f"{Y}    Offline modda devam ediliyor.{R}")
-        return False
+  heartbeat[wax_account] = Date.now();
 
-# ── ANA PROGRAM ────────────────────────────────────────────
-def main():
-    banner()
-    check_gpu()
-    print()
-    check_pool()
-    print()
+  const c           = getContrib.get(wax_account);
+  const prev_bkeys  = c ? c.bkeys_total : 0;
+  const prev_minted = c ? c.nfts_minted : 0;
+  const new_bkeys   = prev_bkeys + bkeys;
+  const nfts_to_mint = Math.floor(new_bkeys / NFT_THRESHOLD) - prev_minted;
+  const new_minted  = prev_minted + nfts_to_mint;
 
-    if not download_kangaroo():
-        input(f"\n{RE}Çıkmak için Enter...{R}")
-        sys.exit(1)
-    print()
+  saveContrib.run({ wax_account, bkeys_total:new_bkeys, nfts_minted:new_minted,
+    last_seen:Date.now(), gpu_type });
 
-    t = threading.Thread(target=reporter, daemon=True)
-    t.start()
-    print(f"{G}[✓] Pool reporter başlatıldı (her {REPORT_SECS}s'de rapor).{R}")
-    print(f"{G}[✓] NFT'ler mint edilecek: {BD}{WAX_ACCOUNT}{R}")
-    print()
-    print(f"{M}{'─'*62}{R}")
-    print(f"{BD}  Tarama başlıyor... Durdurmak için CTRL+C{R}")
-    print(f"{M}{'─'*62}{R}\n")
+  const pool = getPool.get();
+  updatePool.run(pool.total_bkeys + bkeys, pool.total_nfts + nfts_to_mint);
 
-    try:
-        run_kangaroo()
-    except KeyboardInterrupt:
-        elapsed = time.time() - _start
-        h = int(elapsed)//3600
-        m = (int(elapsed)%3600)//60
-        print(f"\n\n{Y}[!] Durduruldu.{R}")
-        print(f"{C}  Süre   : {h:02d}:{m:02d}{R}")
-        print(f"{C}  Bkeys  : {_total_bkeys:,}{R}")
-        print(f"{C}  NFT    : {_nfts}{R}")
+  let tx_id = null;
+  if (nfts_to_mint > 0) {
+    console.log(`[MINT] ${wax_account} → ${nfts_to_mint} NFT`);
+    try {
+      tx_id = await mintOnChain(wax_account, bkeys, nfts_to_mint);
+      addLog.run(wax_account, new_bkeys, nfts_to_mint, tx_id, Date.now());
+    } catch (e) {
+      saveContrib.run({ wax_account, bkeys_total:new_bkeys, nfts_minted:prev_minted,
+        last_seen:Date.now(), gpu_type });
+      return res.status(500).json({ error: 'Mint failed: ' + e.message });
+    }
+  }
 
-    input(f"\n{Y}Çıkmak için Enter...{R}")
+  const p2 = getPool.get();
+  res.json({
+    ok:true, wax_account,
+    bkeys_this_report: bkeys,
+    bkeys_total: new_bkeys,
+    bkeys_until_next_nft: NFT_THRESHOLD - (new_bkeys % NFT_THRESHOLD),
+    new_nfts_minted: nfts_to_mint,
+    user_total_nfts: new_minted,
+    tx_id,
+    pool: { total_bkeys: p2.total_bkeys, total_nfts: p2.total_nfts }
+  });
+});
 
-if __name__ == "__main__":
-    main()
+async function mintOnChain(waxAccount, bkeys, nfts) {
+  if (!api) { console.log(`[SIM] ${waxAccount} → ${nfts} NFT`); return 'sim-'+Date.now(); }
+  const r = await api.transact({ actions:[{
+    account: CONTRACT, name:'mintnft',
+    authorization:[{ actor:ADMIN_ACCOUNT, permission:'active' }],
+    data:{ minter:ADMIN_ACCOUNT, to_account:waxAccount, bkeys, nfts_to_mint:nfts }
+  }]}, { blocksBehind:3, expireSeconds:30 });
+  return r.transaction_id;
+}
+
+// ── GET /api/stats ────────────────────────────────────────
+app.get('/api/stats', (req, res) => {
+  const pool   = getPool.get();
+  const cutoff = Date.now() - 5*60*1000;
+  const active = Object.values(heartbeat).filter(t => t > cutoff).length;
+  res.json({ total_nfts:pool.total_nfts, total_bkeys:pool.total_bkeys,
+    active_workers:active, nft_threshold:NFT_THRESHOLD, solved:pool.solved===1 });
+});
+
+// ── GET /api/leaderboard ──────────────────────────────────
+app.get('/api/leaderboard', (req, res) => {
+  const total = getPool.get().total_nfts || 1;
+  const rows  = db.prepare(`SELECT wax_account,nfts_minted,bkeys_total,gpu_type
+    FROM contributors ORDER BY nfts_minted DESC LIMIT 50`).all();
+  res.json(rows.map((r,i) => ({
+    rank:i+1, account:r.wax_account, nft_count:r.nfts_minted,
+    bkeys_total:r.bkeys_total, gpu_type:r.gpu_type,
+    share_pct:((r.nfts_minted/total)*100).toFixed(4)
+  })));
+});
+
+// ── GET /api/user/:account ────────────────────────────────
+app.get('/api/user/:account', (req, res) => {
+  const total = getPool.get().total_nfts || 1;
+  const c     = getContrib.get(req.params.account);
+  if (!c) return res.json({ nft_count:0, bkeys_total:0, share_pct:'0',
+    bkeys_until_next_nft:NFT_THRESHOLD });
+  res.json({ wax_account:c.wax_account, nft_count:c.nfts_minted,
+    bkeys_total:c.bkeys_total,
+    bkeys_until_next_nft: NFT_THRESHOLD - (c.bkeys_total % NFT_THRESHOLD),
+    gpu_type:c.gpu_type, share_pct:((c.nfts_minted/total)*100).toFixed(4) });
+});
+
+// ── POST /api/solved ──────────────────────────────────────
+app.post('/api/solved', (req, res) => {
+  const { wax_account, line } = req.body;
+  console.log('\n🎉 PUZZLE COZULDU!', wax_account, line);
+  db.prepare('UPDATE pool SET solved=1 WHERE id=0').run();
+  res.json({ ok:true });
+});
+
+// ── GET /api/admin/stats ──────────────────────────────────
+app.get('/api/admin/stats', (req, res) => {
+  const pool  = getPool.get();
+  const users = db.prepare('SELECT * FROM contributors ORDER BY nfts_minted DESC').all();
+  const logs  = db.prepare('SELECT * FROM mint_log ORDER BY id DESC LIMIT 100').all();
+  res.json({ pool, contributors:users, recent_mints:logs });
+});
+
+// ── GET /api/download/worker ──────────────────────────────
+app.get('/api/download/worker', (req, res) => {
+  const { wax, type, format } = req.query;
+  if (!wax) return res.status(400).json({ error:'wax parameter required' });
+
+  const isCuda = type === 'cuda';
+  const pool   = POOL_URL || process.env.POOL_URL || '';
+
+  // ── Windows BAT launcher (hiç kurulum gerektirmez) ────
+  if (format === 'bat' || format === 'win') {
+    const batName = isCuda ? 'PUZZLE135-CUDA-Worker.bat' : 'PUZZLE135-Vulkan-Worker.bat';
+    const workerUrl = `${pool}/api/download/worker?wax=${encodeURIComponent(wax)}&type=${isCuda?'cuda':'vulkan'}&format=py`;
+    const bat = `@echo off
+chcp 65001 >nul 2>&1
+title PUZZLE135 - ${isCuda?'CUDA':'Vulkan'} Worker
+color 0A
+
+echo.
+echo ═══════════════════════════════════════════════════
+echo    PUZZLE135 - ${isCuda?'CUDA (NVIDIA)':'Vulkan (AMD/Intel)'} Worker
+echo    WAX: ${wax}
+echo ═══════════════════════════════════════════════════
+echo.
+
+:: Python kontrol
+python --version >nul 2>&1
+if %errorlevel% == 0 (set PY=python & goto RUN)
+py --version >nul 2>&1
+if %errorlevel% == 0 (set PY=py & goto RUN)
+
+echo [!] Python bulunamadi. Yukleniyor (bir kereligine, ~1 dakika)...
+curl -L -o "%TEMP%\pysetup.exe" "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe"
+"%TEMP%\pysetup.exe" /quiet InstallAllUsers=0 PrependPath=1 Include_test=0
+del "%TEMP%\pysetup.exe" >nul 2>&1
+set PY=python
+echo [OK] Python kuruldu.
+echo.
+
+:RUN
+if not exist "worker.py" (
+  echo [Indiriliyor] Worker dosyasi aliniyor...
+  curl -L -o "worker.py" "${workerUrl}"
+  echo [OK] Hazir.
+  echo.
+)
+%PY% worker.py
+if %errorlevel% neq 0 pause
+`;
+    res.setHeader('Content-Disposition', `attachment; filename="${batName}"`);
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    return res.send(bat);
+  }
+
+  // ── Python dosyası ────────────────────────────────────
+  const srcName = isCuda ? 'cuda_worker.py' : 'vulkan_worker.py';
+  const outName = isCuda ? 'worker.py' : 'worker.py';
+  const srcPath = path.join(process.cwd(), srcName);
+
+  if (!fs.existsSync(srcPath)) {
+    const files = fs.readdirSync(process.cwd());
+    return res.status(404).json({ error:'Worker file not found', cwd:process.cwd(), files });
+  }
+
+  let src = fs.readFileSync(srcPath, 'utf8');
+  src = src.replace('__WAX_ACCOUNT__', wax)
+           .replace('__POOL_URL__', pool);
+
+  res.setHeader('Content-Disposition', `attachment; filename="${outName}"`);
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.send(src);
+});
+
+// ── STATIC ────────────────────────────────────────────────
+const publicDir = path.join(process.cwd(), 'public');
+if (fs.existsSync(publicDir)) app.use(express.static(publicDir));
+
+app.use((req, res) => res.status(404).json({ error:'Not found' }));
+
+// ── START ─────────────────────────────────────────────────
+app.listen(PORT, () => {
+  const pool = getPool.get();
+  console.log(`PUZZLE135 Pool Server v4.0`);
+  console.log(`Port    : ${PORT}`);
+  console.log(`Contract: ${CONTRACT}`);
+  console.log(`WAX API : ${api ? 'ACTIVE' : 'SIMULATED'}`);
+  console.log(`NFTs    : ${pool.total_nfts} | Bkeys: ${pool.total_bkeys}`);
+});
