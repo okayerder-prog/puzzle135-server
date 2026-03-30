@@ -77,6 +77,8 @@ const updatePool = db.prepare('UPDATE pool SET total_bkeys=?,total_nfts=? WHERE 
 const addLog     = db.prepare('INSERT INTO mint_log(wax_account,bkeys,nfts,tx_id,ts) VALUES(?,?,?,?,?)');
 
 const heartbeat = {};
+
+// Daily bonus system removed
 const sessions  = new Map();
 const failedLogins = new Map();
 
@@ -208,10 +210,14 @@ app.post('/api/report', async (req, res) => {
     try {
       tx_id = await mintOnChain(wax_account, bkeys, nfts_to_mint);
       addLog.run(wax_account, new_bkeys, nfts_to_mint, tx_id, Date.now());
+      console.log(`[MINT ✓] ${wax_account} → ${nfts_to_mint} NFT | TX: ${tx_id}`);
     } catch (e) {
+      // Mint başarısız — Bkeys kaydedildi ama NFT sayısı önceki değerde kalır
+      // Bir sonraki raporda tekrar hesaplanacak
+      console.error(`[MINT ✗] ${wax_account}: ${e.message}`);
       saveContrib.run({ wax_account, bkeys_total:new_bkeys, nfts_minted:prev_minted,
         last_seen:Date.now(), gpu_type });
-      return res.status(500).json({ error: 'Mint failed: ' + e.message });
+      // Kullanıcıya hata döndürme — sessizce devam et, bir sonraki raporda tekrar denenecek
     }
   }
 
@@ -279,6 +285,35 @@ app.post('/api/solved', (req, res) => {
   res.json({ ok:true });
 });
 
+// ── POST /api/admin/gift — Manuel NFT Hediye ────────────────
+app.post('/api/admin/gift', async (req, res) => {
+  if (!checkSession(req)) return res.status(401).json({ error:'Not authenticated' });
+  const { wax_account, amount, reason } = req.body;
+  if (!wax_account) return res.status(400).json({ error:'wax_account required' });
+  const nfts = Math.min(1000, Math.max(1, parseInt(amount)||1));
+
+  const contrib = getContrib.get(wax_account);
+  const pool    = getPool.get();
+  saveContrib.run({
+    wax_account,
+    bkeys_total : contrib ? contrib.bkeys_total : 0,
+    nfts_minted : (contrib ? contrib.nfts_minted : 0) + nfts,
+    last_seen   : Date.now(),
+    gpu_type    : contrib ? contrib.gpu_type : 'gift'
+  });
+  updatePool.run(pool.total_bkeys, pool.total_nfts + nfts);
+
+  let tx_id = 'sim-gift-' + Date.now();
+  if (api) {
+    try { tx_id = await mintOnChain(wax_account, 0, nfts); }
+    catch(e) { return res.status(500).json({ error:'Mint failed: '+e.message }); }
+  }
+  addLog.run(wax_account, 0, nfts, tx_id, Date.now());
+  console.log(`[GIFT] ${wax_account} → +${nfts} NFT | ${reason||'manuel'}`);
+  res.json({ ok:true, wax_account, nfts_gifted:nfts, tx_id });
+});
+
+
 // ── GET /api/admin/stats ──────────────────────────────────
 app.get('/api/admin/stats', (req, res) => {
   const pool  = getPool.get();
@@ -341,7 +376,9 @@ if %errorlevel% neq 0 pause
   }
 
   // ── Python dosyası ────────────────────────────────────
-  const srcName = 'worker.py';
+  // worker.py veya vulkan_worker.py'yi ara
+  const srcName = fs.existsSync(path.join(process.cwd(), 'worker.py'))
+    ? 'worker.py' : 'vulkan_worker.py';
   const outName = 'PUZZLE135-Worker.py';
   const srcPath = path.join(process.cwd(), srcName);
 
