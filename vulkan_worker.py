@@ -1,37 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-╔══════════════════════════════════════════════════════════╗
-║         PUZZLE135 — Vulkan Worker  v1.0                 ║
-║   Bitcoin Puzzle #135 Distributed Mining Pool           ║
-║   AMD / Intel GPU  ·  CUDA GEREKMİYOR                  ║
-║   WAX Koleksiyon: puzzle135btc  |  AtomicHub            ║
-╚══════════════════════════════════════════════════════════╝
-Bu dosya sunucu tarafından WAX hesabınıza özel üretilmiştir.
-Çift tıklayarak çalıştırın — başka bir şey gerekmez!
+PUZZLE135 — Vulkan Worker v2.0
+Bitcoin Puzzle #135 Pool Client
+AMD / Intel GPU — CUDA gerekmez
 """
 
 import os, sys, time, json, threading, subprocess, platform
-import urllib.request, urllib.error, re
+import urllib.request, urllib.error, re, io
 
-# ═══════════════════════════════════════════════════════════
-#  CONFIG  (sunucu tarafından inject edilir)
-# ═══════════════════════════════════════════════════════════
-WAX_ACCOUNT     = "__WAX_ACCOUNT__"   # WAX hesabı (opsiyonel)
-BTC_ADDRESS     = "__BTC_ADDRESS__"   # BTC adresi (opsiyonel)
+# ── CONFIG (sunucu tarafından inject edilir) ───────────────
+WAX_ACCOUNT     = "__WAX_ACCOUNT__"
 POOL_URL        = "__POOL_URL__"
 GPU_TYPE        = "vulkan"
-VERSION         = "1.0.0"
-
-# Puzzle 135 sabit parametreler
+VERSION         = "2.0.0"
 PUBKEY          = "02145d2611c823a396ef6712ce0f712f09b9b4f3135e3e0aa3230fb9b6d08d1e16"
 RANGE_START     = "4000000000000000000000000000000000"
 RANGE_END       = "7fffffffffffffffffffffffffffffffff"
 REPORT_SECS     = 30
+NFT_THRESHOLD   = 10000
 
-# ═══════════════════════════════════════════════════════════
-#  RENK KODLARI
-# ═══════════════════════════════════════════════════════════
+# ── RENKLER ───────────────────────────────────────────────
 IS_WIN = platform.system() == "Windows"
 if IS_WIN:
     os.system("color")
@@ -41,103 +30,71 @@ G  = "\033[92m"
 Y  = "\033[93m"
 RE = "\033[91m"
 C  = "\033[96m"
-B  = "\033[94m"
 M  = "\033[95m"
 W  = "\033[97m"
 BD = "\033[1m"
 
-def cls():
-    os.system("cls" if IS_WIN else "clear")
+# ── KANGAROO ──────────────────────────────────────────────
+BIN = "kangaroo.exe" if IS_WIN else "kangaroo"
 
-def banner():
-    cls()
-    w = 62
-    print(f"\n{M}{'═'*w}{R}")
-    print(f"{BD}{M}  ⛏  PUZZLE135  ·  Vulkan Worker  ·  v{VERSION}{R}")
-    print(f"{M}{'─'*w}{R}")
-    print(f"{C}  WAX  : {BD}{W}{WAX_ACCOUNT}{R}")
-    print(f"{C}  Pool : {W}{POOL_URL}{R}")
-    print(f"{C}  GPU  : {M}AMD / Intel Vulkan  (CUDA gerekmez){R}")
-    print(f"{C}  NFT  : {W}puzzle135btc (AtomicHub){R}")
-    print(f"{M}{'─'*w}{R}")
-    print(f"{G}  ✦  Her 100 Bkeys katkında 1 NFT otomatik mint edilir{R}")
-    print(f"{M}{'═'*w}{R}\n")
-
-# ═══════════════════════════════════════════════════════════
-#  VULKAN KANGAROO İNDİR (oritwoen/kangaroo — Rust tabanlı)
-# ═══════════════════════════════════════════════════════════
-# Vulkan Kangaroo — JeanLucPons'un CPU versiyonunu kullanıyoruz
-# (Vulkan GPU desteği için en stabil seçenek)
-# JeanLucPons Kangaroo — en stabil versiyon
-# Manuel indirme gerekebilir: https://github.com/JeanLucPons/Kangaroo/releases
-VULKAN_RELEASES = {
-    "Windows": {
-        "url" : "https://github.com/JeanLucPons/Kangaroo/releases/download/1.0/Kangaroo.exe",
-        "bin" : "kangaroo-vulkan.exe",
-    },
-    "Linux": {
-        "url" : "https://github.com/JeanLucPons/Kangaroo/releases/download/1.0/kangaroo",
-        "bin" : "kangaroo-vulkan",
-    },
+DOWNLOAD_URLS = {
+    "Windows": "https://github.com/JeanLucPons/Kangaroo/releases/download/1.0/Kangaroo.exe",
+    "Linux"  : "https://github.com/JeanLucPons/Kangaroo/releases/download/1.0/kangaroo",
 }
 
-def get_kangaroo_info():
-    return VULKAN_RELEASES.get(platform.system(), VULKAN_RELEASES["Linux"])
+def banner():
+    os.system("cls" if IS_WIN else "clear")
+    print(f"""
+{M}{'='*62}{R}
+{BD}  PUZZLE135  Vulkan Worker  v{VERSION}{R}
+{M}{'─'*62}{R}
+{C}  WAX  : {BD}{W}{WAX_ACCOUNT}{R}
+{C}  Pool : {W}{POOL_URL}{R}
+{C}  GPU  : {M}AMD / Intel Vulkan{R}
+{M}{'─'*62}{R}
+{G}  Her {NFT_THRESHOLD:,} Bkeys = 1 NFT  →  ibdak.c.wam'a mint edilir{R}
+{M}{'='*62}{R}
+""")
 
-def download_file(url, dest, label="Dosya"):
-    print(f"{Y}[↓] {label} indiriliyor...{R}")
+# ── KANGaROO İNDİR ────────────────────────────────────────
+def download_kangaroo():
+    if os.path.exists(BIN):
+        print(f"{G}[✓] Kangaroo mevcut: {BIN}{R}")
+        return True
+    url = DOWNLOAD_URLS.get(platform.system())
+    if not url:
+        print(f"{RE}[✗] Bu OS desteklenmiyor.{R}")
+        return False
+    print(f"{Y}[↓] Kangaroo indiriliyor...{R}")
     try:
         done = [False]
-        def progress(block, bsize, total):
+        def prog(b, bs, total):
             if total > 0 and not done[0]:
-                pct = min(100, block * bsize * 100 // total)
-                bar = "█" * (pct // 4) + "░" * (25 - pct // 4)
+                pct = min(100, b*bs*100//total)
+                bar = "█"*(pct//4) + "░"*(25-pct//4)
                 sys.stdout.write(f"\r    [{bar}] {pct}%  ")
                 sys.stdout.flush()
-                if pct >= 100:
-                    done[0] = True
-        urllib.request.urlretrieve(url, dest, reporthook=progress)
-        print(f"\n{G}[✓] {label} indirildi → {dest}{R}")
+                if pct >= 100: done[0] = True
+        urllib.request.urlretrieve(url, BIN, reporthook=prog)
+        print(f"\n{G}[✓] İndirildi: {BIN}{R}")
+        if not IS_WIN:
+            os.chmod(BIN, 0o755)
         return True
     except Exception as e:
         print(f"\n{RE}[✗] İndirme hatası: {e}{R}")
+        print(f"{Y}    Manuel indir: {url}{R}")
         return False
 
-def ensure_kangaroo():
-    info     = get_kangaroo_info()
-    url, bin_name = info["url"], info["bin"]
-    if os.path.exists(bin_name):
-        print(f"{G}[✓] Kangaroo (Vulkan) zaten mevcut: {bin_name}{R}")
-        return bin_name
-    if not download_file(url, bin_name, "Kangaroo Vulkan (Rust tabanlı)"):
-        return None
-    if not IS_WIN:
-        os.chmod(bin_name, 0o755)
-    return bin_name
-
-# ═══════════════════════════════════════════════════════════
-#  POOL REPORTER  (arka planda)
-# ═══════════════════════════════════════════════════════════
+# ── POOL REPORTER ─────────────────────────────────────────
 _lock          = threading.Lock()
 _bkeys_pending = 0
 _total_bkeys   = 0
-_current_speed = 0.0
-_nfts_earned   = 0
-_session_start = time.time()
+_speed         = 0.0
+_nfts          = 0
+_start         = time.time()
 
-def _send(endpoint, payload):
-    data = json.dumps(payload).encode()
-    req  = urllib.request.Request(
-        f"{POOL_URL}{endpoint}",
-        data    = data,
-        headers = {"Content-Type": "application/json"},
-        method  = "POST"
-    )
-    with urllib.request.urlopen(req, timeout=10) as r:
-        return json.loads(r.read())
-
-def reporter_thread():
-    global _bkeys_pending, _nfts_earned
+def reporter():
+    global _bkeys_pending, _nfts
     while True:
         time.sleep(REPORT_SECS)
         with _lock:
@@ -146,111 +103,94 @@ def reporter_thread():
         if bk <= 0:
             continue
         try:
-            resp = _send("/api/report", {
-                "wax_account" : WAX_ACCOUNT if WAX_ACCOUNT != "__WAX_ACCOUNT__" else None,
-                "btc_address" : BTC_ADDRESS if BTC_ADDRESS != "__BTC_ADDRESS__" else None,
+            data = json.dumps({
+                "wax_account" : WAX_ACCOUNT,
                 "bkeys"       : bk,
                 "gpu_type"    : GPU_TYPE,
-                "speed_mkeys" : round(_current_speed, 2),
+                "speed_mkeys" : round(_speed, 2),
                 "version"     : VERSION
-            })
-            _nfts_earned = resp.get("user_nfts", _nfts_earned)
-            total_pool   = resp.get("total_nfts", 0)
-            new_nfts     = resp.get("new_nfts", 0)
-            nft_str      = f"  {G}+{new_nfts} NFT MINT!{R}" if new_nfts > 0 else ""
-            print(f"\n{G}[✓] Pool raporu → {bk:,} Bkeys | "
-                  f"NFT'lerim: {_nfts_earned} | "
-                  f"Havuz NFT: {total_pool}{nft_str}{R}")
+            }).encode()
+            req = urllib.request.Request(
+                f"{POOL_URL}/api/report",
+                data=data, method="POST",
+                headers={"Content-Type": "application/json"}
+            )
+            with urllib.request.urlopen(req, timeout=15) as r:
+                resp = json.loads(r.read())
+            _nfts    = resp.get("user_total_nfts", _nfts)
+            new_nfts = resp.get("new_nfts_minted", 0)
+            until    = resp.get("bkeys_until_next_nft", NFT_THRESHOLD)
+            msg = f"\n{G}[✓] Rapor gönderildi → {bk:,} Bkeys"
+            if new_nfts > 0:
+                msg += f" | {G}{BD}+{new_nfts} NFT MINT!{R}"
+            msg += f" | Toplam NFT: {_nfts} | Sonraki: {until:,} Bkeys{R}"
+            print(msg)
         except Exception as e:
             print(f"\n{Y}[!] Rapor gönderilemedi: {e}{R}")
 
-# ═══════════════════════════════════════════════════════════
-#  KANGAROO ÇALIŞTIRICISI
-# ═══════════════════════════════════════════════════════════
-_speed_pattern  = re.compile(
-    r'\[(\d+\.?\d*)\s*([MBGKk])Key/s\]', re.IGNORECASE
-)
-_solved_keywords = [
-    "priv", "private key", "key found", "found",
-    "solved", "winner", "secret", "pkey"
-]
-
-def parse_speed(line):
-    # JeanLucPons format: [34.28 MKey/s]
-    m = re.search(r'\[(\d+\.?\d*)\s*([MBGKk])Key/s\]', line, re.I)
-    if not m:
-        return None
-    val  = float(m.group(1))
-    unit = m.group(2).upper()
-    if unit == 'K': val /= 1000
-    elif unit == 'B': val *= 1000
-    elif unit == 'G': val *= 1_000_000
-    return val
-
-def time_to_next_nft(speed_mkeys, bkeys_total, nfts_minted):
-    if speed_mkeys <= 0: return "—"
-    remaining_bkeys = REPORT_INTERVAL - (bkeys_total % REPORT_INTERVAL)
-    if remaining_bkeys <= 0: remaining_bkeys = REPORT_INTERVAL
-    secs = (remaining_bkeys * 1000) / speed_mkeys
+# ── HIZLANDIRILMIŞ ÇIKTI OKUMA ────────────────────────────
+def time_per_nft(speed):
+    if speed <= 0: return "—"
+    secs = (NFT_THRESHOLD * 1000) / speed
     if secs < 60:   return f"{int(secs)}s"
     if secs < 3600: return f"{secs/60:.1f}m"
     return f"{secs/3600:.1f}h"
 
-def nfts_per_day(speed_mkeys):
-    if speed_mkeys <= 0: return 0
-    return (speed_mkeys * 86400) / (10000 * 1000)
+def nfts_per_day(speed):
+    if speed <= 0: return 0
+    return (speed * 86400) / (NFT_THRESHOLD * 1000)
 
-def status_bar(speed, bkeys_total, nfts, elapsed):
-    bar_len = 26
-    filled  = min(bar_len, int(speed / 50))
-    bar     = "█" * filled + "░" * (bar_len - filled)
-    hrs     = int(elapsed) // 3600
-    mins    = (int(elapsed) % 3600) // 60
-    secs    = int(elapsed) % 60
-    bk_str  = f"{bkeys_total/1e6:.1f}M" if bkeys_total >= 1e6 else f"{bkeys_total//1000}K"
-    npd     = nfts_per_day(speed)
-    nxt     = time_to_next_nft(speed, bkeys_total, nfts)
-    npd_str = f"{npd:.1f}/day" if npd >= 1 else f"1/{nxt}"
+def status(speed, bk_total, nfts, elapsed):
+    bar_w  = 24
+    filled = min(bar_w, int(speed / 50))
+    bar    = "█"*filled + "░"*(bar_w-filled)
+    h      = int(elapsed)//3600
+    m      = (int(elapsed)%3600)//60
+    s      = int(elapsed)%60
+    bk_str = f"{bk_total/1e6:.1f}M" if bk_total >= 1e6 else f"{bk_total//1000}K"
+    npd    = nfts_per_day(speed)
+    nxt    = time_per_nft(speed)
+    rate   = f"{npd:.1f}/day" if npd >= 1 else f"1/{nxt}"
     sys.stdout.write(
-        f"\r{M}[⚡]{R} {speed:6.1f} Mkeys/s  "
-        f"{C}[{bar}]{R}  "
-        f"NFT:{G}{nfts}{R}({Y}{npd_str}{R})  "
-        f"Next:{G}{nxt}{R}  "
-        f"Bkeys:{W}{bk_str}{R}  "
-        f"{Y}{hrs:02d}:{mins:02d}:{secs:02d}{R}   "
+        f"\r{M}[⚡]{R} {speed:6.1f} Mkeys/s "
+        f"{C}[{bar}]{R} "
+        f"NFT:{G}{nfts}{R}({Y}{rate}{R}) "
+        f"Next:{G}{nxt}{R} "
+        f"Bkeys:{W}{bk_str}{R} "
+        f"{Y}{h:02d}:{m:02d}:{s:02d}{R}   "
     )
     sys.stdout.flush()
 
-def run_kangaroo(bin_name):
-    global _bkeys_pending, _total_bkeys, _current_speed
+# ── KANGAROO ÇALIŞTIR ─────────────────────────────────────
+def run_kangaroo():
+    global _bkeys_pending, _total_bkeys, _speed
 
-    # Puzzle dosyası oluştur
-    puzzle_file = "puzzle135.txt"
-    with open(puzzle_file, "w") as pf:
-        pf.write(f"{RANGE_START}\n")
-        pf.write(f"{RANGE_END}\n")
-        pf.write(f"{PUBKEY}\n")
-    print(f"{C}[✓] puzzle135.txt olusturuldu.{R}")
+    # Puzzle dosyası — JeanLucPons formatı
+    with open("puzzle135.txt", "w") as f:
+        f.write(f"{RANGE_START}\n{RANGE_END}\n{PUBKEY}\n")
+    print(f"{G}[✓] puzzle135.txt oluşturuldu.{R}")
 
-    if IS_WIN:
-        cmd = [bin_name, puzzle_file]
-    else:
-        cmd = [f"./{bin_name}", puzzle_file]
-
-    print(f"\n{C}[►] Kangaroo başlatılıyor: {' '.join(cmd)}{R}\n")
+    cmd = ([BIN] if IS_WIN else [f"./{BIN}"]) + ["puzzle135.txt"]
+    print(f"\n{C}[►] Başlatılıyor: {' '.join(cmd)}{R}\n")
 
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT
+        )
     except FileNotFoundError:
-        print(f"{RE}[✗] {bin_name} bulunamadı!{R}")
+        print(f"{RE}[✗] {BIN} bulunamadı!{R}")
         return
 
+    # Kangaroo \r ile yazar — byte byte oku
     buf = b""
     while True:
         ch = proc.stdout.read(1)
         if not ch:
             break
-        if ch == b'\n' or ch == b'\r':
+
+        if ch in (b'\r', b'\n'):
             if not buf:
                 continue
             try:
@@ -258,166 +198,120 @@ def run_kangaroo(bin_name):
             except:
                 line = ""
             buf = b""
+
             if not line:
                 continue
 
-            # Hız parse et: [34.28 MKey/s]
-            import re as _re
-            m = _re.search(r'\[([\d.]+)\s*([MBGKk])Key/s\]', line, _re.I)
+            # Hız: [34.28 MKey/s]
+            m = re.search(r'\[([\d.]+)\s*([MBGKk])Key/s\]', line, re.I)
             if m:
                 val  = float(m.group(1))
                 unit = m.group(2).upper()
-                if unit == 'K': val /= 1000
+                if   unit == 'K': val /= 1000
                 elif unit == 'B': val *= 1000
                 elif unit == 'G': val *= 1_000_000
-                _current_speed = val
-
+                _speed = val
                 bk = int(val * 1)
                 with _lock:
                     _bkeys_pending += bk
                     _total_bkeys   += bk
-
-                elapsed = time.time() - _session_start
-                npd = nfts_per_day(val)
-                nxt = time_to_next_nft(val, _total_bkeys, 0)
-                hrs = int(elapsed)//3600
-                mins2 = (int(elapsed)%3600)//60
-                secs2 = int(elapsed)%60
-                bk_str = f"{_total_bkeys/1e6:.1f}M" if _total_bkeys>=1e6 else f"{_total_bkeys//1000}K"
-                npd_str = f"{npd:.1f}/day" if npd>=1 else f"1/{nxt}"
-                sys.stdout.write(
-                    f"\r{M}[⚡]{R} {val:6.1f} Mkeys/s  "
-                    f"NFT:{G}0{R}({Y}{npd_str}{R})  "
-                    f"Next:{G}{nxt}{R}  "
-                    f"Bkeys:{W}{bk_str}{R}  "
-                    f"{Y}{hrs:02d}:{mins2:02d}:{secs2:02d}{R}   "
-                )
-                sys.stdout.flush()
+                status(val, _total_bkeys, _nfts, time.time()-_start)
                 continue
 
-            # Çözüm tespiti
+            # Çözüm
             ll = line.lower()
             if any(k in ll for k in ["priv", "pkey", "key found", "solved", "winner"]):
-                _handle_solved(line)
+                solved(line)
                 continue
 
-            # Önemli satırlar
-            if any(k in ll for k in ["error", "start:", "stop:", "keys:", "thread", "range"]):
+            # Bilgi satırları
+            if any(k in ll for k in ["start:", "stop:", "keys:", "thread", "range", "error", "dp size"]):
                 print(f"\n{Y}[i] {line}{R}")
         else:
             buf += ch
 
     proc.wait()
     print(f"\n{Y}[!] Kangaroo sona erdi (kod: {proc.returncode}).{R}")
-def _handle_solved(line):
-    print(f"\n\n{G}{'★'*64}{R}")
-    print(f"{BD}{G}     🎉  PUZZLE #135 ÇÖZÜLDÜ!  🎉{R}")
-    print(f"{G}     {line}{R}")
-    print(f"{G}{'★'*64}{R}\n")
-    try:
-        _send("/api/solved", {"wax_account": WAX_ACCOUNT, "line": line, "gpu_type": GPU_TYPE})
-        print(f"{G}[✓] Çözüm pool sunucusuna bildirildi!{R}")
-    except Exception as e:
-        print(f"{RE}[!] Sunucuya bildirim gönderilemedi: {e}{R}")
-        print(f"{Y}    Bu private key'i kaydet: {line}{R}")
-    input(f"\n{Y}Devam etmek için Enter...{R}")
 
-# ═══════════════════════════════════════════════════════════
-#  GPU KONTROLLERI
-# ═══════════════════════════════════════════════════════════
+def solved(line):
+    print(f"\n\n{G}{'★'*60}{R}")
+    print(f"{BD}{G}  🎉 PUZZLE #135 ÇÖZÜLDÜ! 🎉{R}")
+    print(f"{G}  {line}{R}")
+    print(f"{G}{'★'*60}{R}\n")
+    try:
+        data = json.dumps({"wax_account":WAX_ACCOUNT,"line":line,"gpu_type":GPU_TYPE}).encode()
+        req  = urllib.request.Request(f"{POOL_URL}/api/solved", data=data,
+               method="POST", headers={"Content-Type":"application/json"})
+        urllib.request.urlopen(req, timeout=10)
+        print(f"{G}[✓] Pool'a bildirildi!{R}")
+    except Exception as e:
+        print(f"{RE}[!] Bildirim gönderilemedi: {e}{R}")
+        print(f"{Y}    Private key'i sakla: {line}{R}")
+    input(f"\n{Y}Enter'a bas...{R}")
+
+# ── GPU KONTROL ────────────────────────────────────────────
 def check_gpu():
     print(f"{C}[i] GPU kontrol ediliyor...{R}")
-    found = False
-
-    # AMD — ROCm
     try:
-        r = subprocess.run(["rocm-smi", "--showproductname"],
-                           capture_output=True, text=True, timeout=5)
-        if r.returncode == 0:
-            for ln in r.stdout.strip().split('\n'):
-                if ln.strip():
-                    print(f"{G}[✓] AMD GPU (ROCm): {ln.strip()}{R}")
-            found = True
-    except: pass
-
-    # Vulkan info
-    try:
-        r = subprocess.run(["vulkaninfo", "--summary"],
-                           capture_output=True, text=True, timeout=5)
+        r = subprocess.run(["vulkaninfo","--summary"], capture_output=True, text=True, timeout=5)
         if r.returncode == 0:
             for ln in r.stdout.split('\n'):
                 if 'deviceName' in ln or 'deviceType' in ln:
                     print(f"{G}[✓] Vulkan GPU: {ln.strip()}{R}")
-                    found = True
                     break
-    except: pass
+        else:
+            print(f"{Y}[!] vulkaninfo bulunamadı, devam ediliyor...{R}")
+    except:
+        print(f"{Y}[!] GPU doğrulama atlandı.{R}")
 
-    # Hiç bulunamadı
-    if not found:
-        print(f"{Y}[!] GPU doğrulaması atlandı — devam ediliyor...{R}")
-        print(f"{Y}    AMD için: Radeon Software yüklü olmalı{R}")
-        print(f"{Y}    Intel için: Arc/Iris sürücüsü yüklü olmalı{R}")
-
+# ── POOL KONTROL ───────────────────────────────────────────
 def check_pool():
-    print(f"{C}[i] Pool sunucusu kontrol ediliyor: {POOL_URL}{R}")
+    print(f"{C}[i] Pool kontrol ediliyor: {POOL_URL}{R}")
     try:
-        with urllib.request.urlopen(f"{POOL_URL}/api/stats", timeout=8) as r:
+        with urllib.request.urlopen(f"{POOL_URL}/api/stats", timeout=10) as r:
             d = json.loads(r.read())
-            print(f"{G}[✓] Pool bağlantısı OK  |  "
-                  f"Toplam NFT: {d.get('total_nfts',0)}  |  "
-                  f"Worker: {d.get('active_workers',0)}{R}")
+            print(f"{G}[✓] Pool OK  |  NFT: {d.get('total_nfts',0)}  |  Worker: {d.get('active_workers',0)}{R}")
             return True
     except Exception as e:
         print(f"{Y}[!] Pool bağlantısı kurulamadı: {e}{R}")
-        print(f"{Y}    Çalışmaya devam edilecek (offline mod){R}")
+        print(f"{Y}    Offline modda devam ediliyor.{R}")
         return False
 
-# ═══════════════════════════════════════════════════════════
-#  ANA PROGRAM
-# ═══════════════════════════════════════════════════════════
+# ── ANA PROGRAM ────────────────────────────────────────────
 def main():
     banner()
-
-    # 1. GPU Kontrolü
     check_gpu()
     print()
-
-    # 2. Pool Kontrolü
     check_pool()
     print()
 
-    # 3. Kangaroo İndir
-    bin_name = ensure_kangaroo()
-    if not bin_name:
-        print(f"{RE}[✗] Kangaroo Vulkan indirilemedi, çıkılıyor.{R}")
-        input("Çıkmak için Enter...")
+    if not download_kangaroo():
+        input(f"\n{RE}Çıkmak için Enter...{R}")
         sys.exit(1)
     print()
 
-    # 4. Reporter Başlat
-    t = threading.Thread(target=reporter_thread, daemon=True)
+    t = threading.Thread(target=reporter, daemon=True)
     t.start()
     print(f"{G}[✓] Pool reporter başlatıldı (her {REPORT_SECS}s'de rapor).{R}")
-    print(f"{G}[✓] Kazanılan NFT'ler WAX hesabına mint edilir: {BD}{WAX_ACCOUNT}{R}")
+    print(f"{G}[✓] NFT'ler mint edilecek: {BD}{WAX_ACCOUNT}{R}")
     print()
-
     print(f"{M}{'─'*62}{R}")
     print(f"{BD}  Tarama başlıyor... Durdurmak için CTRL+C{R}")
     print(f"{M}{'─'*62}{R}\n")
 
-    # 5. Kangaroo'yu Çalıştır
     try:
-        run_kangaroo(bin_name)
+        run_kangaroo()
     except KeyboardInterrupt:
+        elapsed = time.time() - _start
+        h = int(elapsed)//3600
+        m = (int(elapsed)%3600)//60
         print(f"\n\n{Y}[!] Durduruldu.{R}")
-        elapsed = time.time() - _session_start
-        hrs  = int(elapsed) // 3600
-        mins = (int(elapsed) % 3600) // 60
-        print(f"{C}  Çalışma süresi : {hrs:02d}:{mins:02d}{R}")
-        print(f"{C}  Toplam Bkeys   : {_total_bkeys:,}{R}")
-        print(f"{C}  Kazanılan NFT  : {_nfts_earned}{R}")
+        print(f"{C}  Süre   : {h:02d}:{m:02d}{R}")
+        print(f"{C}  Bkeys  : {_total_bkeys:,}{R}")
+        print(f"{C}  NFT    : {_nfts}{R}")
 
     input(f"\n{Y}Çıkmak için Enter...{R}")
 
 if __name__ == "__main__":
     main()
+v
