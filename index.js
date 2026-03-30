@@ -98,7 +98,7 @@ function recordFail(ip) {
   if (entry.count >= MAX_ATTEMPTS) {
     entry.bannedUntil = Date.now() + BAN_MINUTES * 60 * 1000;
     entry.count = 0;
-    console.log(\`[SECURITY] IP \${ip} banned for \${BAN_MINUTES} minutes\`);
+    console.log(`[SECURITY] IP ${ip} banned for ${BAN_MINUTES} minutes`);
   }
   loginAttempts.set(ip, entry);
 }
@@ -129,7 +129,7 @@ app.post('/api/admin/login', (req, res) => {
   if (brute.blocked) {
     return res.status(429).json({
       ok: false,
-      error: \`Too many attempts. Try again in \${brute.mins} minutes.\`
+      error: `Too many attempts. Try again in ${brute.mins} minutes.`
     });
   }
 
@@ -152,10 +152,10 @@ app.post('/api/admin/login', (req, res) => {
 
   // HttpOnly cookie — JS okuyamaz, XSS'e karşı koruma
   res.setHeader('Set-Cookie',
-    \`admin_session=\${token}; HttpOnly; SameSite=Strict; Max-Age=\${SESSION_HOURS*3600}; Path=/\`
+    `admin_session=${token}; HttpOnly; SameSite=Strict; Max-Age=${SESSION_HOURS*3600}; Path=/`
   );
 
-  console.log(\`[ADMIN] Login from \${ip}\`);
+  console.log(`[ADMIN] Login from ${ip}`);
   res.json({ ok: true });
 });
 
@@ -180,7 +180,7 @@ app.get('/admin', (req, res) => {
 // ── GET /admin-login — Login sayfası ─────────────────────
 app.get('/admin-login', (req, res) => {
   if (isValidSession(req)) return res.redirect('/admin');
-  res.send(\`<!DOCTYPE html>
+  res.send(`<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>Admin Login</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
@@ -230,7 +230,7 @@ async function login(){
   }catch(e){err.textContent='Connection error';err.style.display='block';}
   btn.textContent='Login'; btn.disabled=false;
 }
-</script></body></html>\`);
+</script></body></html>`);
 });
 
 // ── Admin API middleware — tüm /api/admin/* session ister ─
