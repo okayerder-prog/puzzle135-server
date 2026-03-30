@@ -482,11 +482,36 @@ app.get('/api/prices', async (req, res) => {
     return res.json(priceCache.data);
   }
   try {
-    const r = await fetch(
-      'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,wax&vs_currencies=usd',
-      { headers: { 'Accept': 'application/json' }, timeout: 8000 }
-    );
-    const data = await r.json();
+    // CoinGecko demo API - rate limit aşılırsa alternatife geç
+    let data = null;
+    
+    // Önce CoinGecko dene
+    try {
+      const r1 = await fetch(
+        'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,wax&vs_currencies=usd&x_cg_demo_api_key=CG-demo',
+        { headers: { 'Accept': 'application/json' } }
+      );
+      data = await r1.json();
+      if (data.status?.error_code === 429) data = null;
+    } catch {}
+
+    // Alternatif: CoinPaprika (limit yok)
+    if (!data?.bitcoin) {
+      try {
+        const [btcR, waxR] = await Promise.all([
+          fetch('https://api.coinpaprika.com/v1/tickers/btc-bitcoin?quotes=USD'),
+          fetch('https://api.coinpaprika.com/v1/tickers/wax-wax?quotes=USD')
+        ]);
+        const btcD = await btcR.json();
+        const waxD = await waxR.json();
+        data = {
+          bitcoin: { usd: btcD.quotes?.USD?.price || 95000 },
+          wax    : { usd: waxD.quotes?.USD?.price || 0.05 }
+        };
+      } catch {}
+    }
+
+    if (!data) data = { bitcoin:{usd:95000}, wax:{usd:0.05} };
     priceCache = { data, ts: Date.now() };
     res.json(data);
   } catch(e) {
