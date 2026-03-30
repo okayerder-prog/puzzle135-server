@@ -473,6 +473,29 @@ app.get('/api/download/setup', (req, res) => {
   res.send(bat);
 });
 
+// ── GET /api/prices — CoinGecko Proxy ───────────────────
+let priceCache = { data: null, ts: 0 };
+
+app.get('/api/prices', async (req, res) => {
+  // 60 saniye cache
+  if (priceCache.data && Date.now() - priceCache.ts < 60000) {
+    return res.json(priceCache.data);
+  }
+  try {
+    const r = await fetch(
+      'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,wax&vs_currencies=usd',
+      { headers: { 'Accept': 'application/json' }, timeout: 8000 }
+    );
+    const data = await r.json();
+    priceCache = { data, ts: Date.now() };
+    res.json(data);
+  } catch(e) {
+    // Cache varsa eski veriyi döndür
+    if (priceCache.data) return res.json(priceCache.data);
+    res.json({ bitcoin: { usd: 95000 }, wax: { usd: 0.05 } });
+  }
+});
+
 // ── POST /api/ai — Anthropic Proxy ───────────────────────
 // Rate limit: IP başına günlük 4 istek
 const aiUsage = new Map(); // ip → { count, date }
