@@ -168,24 +168,20 @@ def reporter_thread():
 #  KANGAROO ÇALIŞTIRICISI
 # ═══════════════════════════════════════════════════════════
 _speed_pattern  = re.compile(
-    r'(\d+\.?\d*)\s*([MBGKk])\s*(?:key|Key)s?/s', re.IGNORECASE
+    r'\[(\d+\.?\d*)\s*([MBGKk])Key/s\]', re.IGNORECASE
 )
 _solved_keywords = [
-    "priv", "private key", "key found", "found key",
-    "solved", "winner", "secret"
+    "priv", "private key", "key found", "found",
+    "solved", "winner", "secret", "pkey"
 ]
 
 def parse_speed(line):
-    m = _speed_pattern.search(line)
+    # JeanLucPons format: [34.28 MKey/s]
+    m = re.search(r'\[(\d+\.?\d*)\s*([MBGKk])Key/s\]', line, re.I)
     if not m:
-        # Alternatif format: "speed: 1.5M"
-        m2 = re.search(r'speed[:\s]+(\d+\.?\d*)\s*([MBGKk])', line, re.I)
-        if not m2:
-            return None
-        val, unit = float(m2.group(1)), m2.group(2).upper()
-    else:
-        val, unit = float(m.group(1)), m.group(2).upper()
-
+        return None
+    val  = float(m.group(1))
+    unit = m.group(2).upper()
     if unit == 'K': val /= 1000
     elif unit == 'B': val *= 1000
     elif unit == 'G': val *= 1_000_000
@@ -202,7 +198,7 @@ def time_to_next_nft(speed_mkeys, bkeys_total, nfts_minted):
 
 def nfts_per_day(speed_mkeys):
     if speed_mkeys <= 0: return 0
-    return (speed_mkeys * 86400) / (100 * 1000)
+    return (speed_mkeys * 86400) / (10000 * 1000)
 
 def status_bar(speed, bkeys_total, nfts, elapsed):
     bar_len = 26
@@ -238,8 +234,7 @@ def run_kangaroo(bin_name):
     with open(puzzle_file, "w") as pf:
         pf.write(f"{RANGE_START}\n")
         pf.write(f"{RANGE_END}\n")
-        pf.write(f"1\n")           # adet: 1 anahtar
-        pf.write(f"{PUBKEY}\n")    # hedef public key
+        pf.write(f"{PUBKEY}\n")
     print(f"{C}[✓] puzzle135.txt olusturuldu.{R}")
 
     # JeanLucPons Kangaroo: sadece puzzle dosyası gerekiyor
