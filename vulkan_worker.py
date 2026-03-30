@@ -224,12 +224,7 @@ def status_bar(speed, bkeys_total, nfts, elapsed):
 def run_kangaroo(bin_name):
     global _bkeys_pending, _total_bkeys, _current_speed
 
-    # oritwoen/kangaroo CLI arayüzü
-    # JeanLucPons Kangaroo puzzle dosyası oluştur
-    # JeanLucPons format:
-    # Satir 1: aralik baslangic (hex)
-    # Satir 2: aralik bitis (hex)  
-    # Satir 3: hedef public key
+    # Puzzle dosyası oluştur
     puzzle_file = "puzzle135.txt"
     with open(puzzle_file, "w") as pf:
         pf.write(f"{RANGE_START}\n")
@@ -237,58 +232,83 @@ def run_kangaroo(bin_name):
         pf.write(f"{PUBKEY}\n")
     print(f"{C}[✓] puzzle135.txt olusturuldu.{R}")
 
-    # JeanLucPons Kangaroo: sadece puzzle dosyası gerekiyor
     if IS_WIN:
         cmd = [bin_name, puzzle_file]
     else:
         cmd = [f"./{bin_name}", puzzle_file]
 
-    print(f"{C}[►] Kangaroo Vulkan başlatılıyor:{R}")
-    print(f"{C}    {' '.join(cmd)}{R}\n")
+    print(f"\n{C}[►] Kangaroo başlatılıyor: {' '.join(cmd)}{R}\n")
 
     try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout = subprocess.PIPE,
-            stderr = subprocess.STDOUT,
-            bufsize= 0,   # unbuffered
-        )
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     except FileNotFoundError:
-        print(f"{RE}[✗] '{bin_name}' bulunamadı!{R}")
+        print(f"{RE}[✗] {bin_name} bulunamadı!{R}")
         return
 
-    import io
-    reader = io.TextIOWrapper(proc.stdout, encoding='utf-8', errors='replace', line_buffering=True)
-    for raw_line in reader:
-        line = raw_line.strip()
-        if not line:
-            continue
+    buf = b""
+    while True:
+        ch = proc.stdout.read(1)
+        if not ch:
+            break
+        if ch == b'\n' or ch == b'\r':
+            if not buf:
+                continue
+            try:
+                line = buf.decode('utf-8', errors='replace').strip()
+            except:
+                line = ""
+            buf = b""
+            if not line:
+                continue
 
-        # Hız tespiti
-        speed = parse_speed(line)
-        if speed is not None:
-            _current_speed = speed
-            bk_delta       = int(speed * 1)
-            with _lock:
-                _bkeys_pending += bk_delta
-                _total_bkeys   += bk_delta
-            elapsed = time.time() - _session_start
-            status_bar(speed, _total_bkeys, _nfts_earned, elapsed)
-            continue
+            # Hız parse et: [34.28 MKey/s]
+            import re as _re
+            m = _re.search(r'\[([\d.]+)\s*([MBGKk])Key/s\]', line, _re.I)
+            if m:
+                val  = float(m.group(1))
+                unit = m.group(2).upper()
+                if unit == 'K': val /= 1000
+                elif unit == 'B': val *= 1000
+                elif unit == 'G': val *= 1_000_000
+                _current_speed = val
 
-        # Çözüm tespiti
-        ll = line.lower()
-        if any(k in ll for k in _solved_keywords):
-            _handle_solved(line)
-            continue
+                bk = int(val * 1)
+                with _lock:
+                    _bkeys_pending += bk
+                    _total_bkeys   += bk
 
-        # Diğer önemli loglar
-        if any(k in ll for k in ["error", "vulkan", "gpu", "device", "warning", "init", "backend"]):
-            print(f"\n{Y}[i] {line}{R}")
+                elapsed = time.time() - _session_start
+                npd = nfts_per_day(val)
+                nxt = time_to_next_nft(val, _total_bkeys, 0)
+                hrs = int(elapsed)//3600
+                mins2 = (int(elapsed)%3600)//60
+                secs2 = int(elapsed)%60
+                bk_str = f"{_total_bkeys/1e6:.1f}M" if _total_bkeys>=1e6 else f"{_total_bkeys//1000}K"
+                npd_str = f"{npd:.1f}/day" if npd>=1 else f"1/{nxt}"
+                sys.stdout.write(
+                    f"\r{M}[⚡]{R} {val:6.1f} Mkeys/s  "
+                    f"NFT:{G}0{R}({Y}{npd_str}{R})  "
+                    f"Next:{G}{nxt}{R}  "
+                    f"Bkeys:{W}{bk_str}{R}  "
+                    f"{Y}{hrs:02d}:{mins2:02d}:{secs2:02d}{R}   "
+                )
+                sys.stdout.flush()
+                continue
+
+            # Çözüm tespiti
+            ll = line.lower()
+            if any(k in ll for k in ["priv", "pkey", "key found", "solved", "winner"]):
+                _handle_solved(line)
+                continue
+
+            # Önemli satırlar
+            if any(k in ll for k in ["error", "start:", "stop:", "keys:", "thread", "range"]):
+                print(f"\n{Y}[i] {line}{R}")
+        else:
+            buf += ch
 
     proc.wait()
-    print(f"\n{Y}[!] Kangaroo Vulkan süreci sona erdi (kod: {proc.returncode}).{R}")
-
+    print(f"\n{Y}[!] Kangaroo sona erdi (kod: {proc.returncode}).{R}")
 def _handle_solved(line):
     print(f"\n\n{G}{'★'*64}{R}")
     print(f"{BD}{G}     🎉  PUZZLE #135 ÇÖZÜLDÜ!  🎉{R}")
