@@ -17,7 +17,8 @@ import urllib.request, urllib.error, re
 # ═══════════════════════════════════════════════════════════
 #  CONFIG  (sunucu tarafından inject edilir)
 # ═══════════════════════════════════════════════════════════
-WAX_ACCOUNT     = "__WAX_ACCOUNT__"
+WAX_ACCOUNT     = "__WAX_ACCOUNT__"   # WAX hesabı (opsiyonel)
+BTC_ADDRESS     = "__BTC_ADDRESS__"   # BTC adresi (opsiyonel)
 POOL_URL        = "__POOL_URL__"
 GPU_TYPE        = "vulkan"
 VERSION         = "1.0.0"
@@ -65,13 +66,17 @@ def banner():
 # ═══════════════════════════════════════════════════════════
 #  VULKAN KANGAROO İNDİR (oritwoen/kangaroo — Rust tabanlı)
 # ═══════════════════════════════════════════════════════════
+# Vulkan Kangaroo — JeanLucPons'un CPU versiyonunu kullanıyoruz
+# (Vulkan GPU desteği için en stabil seçenek)
+# JeanLucPons Kangaroo — en stabil versiyon
+# Manuel indirme gerekebilir: https://github.com/JeanLucPons/Kangaroo/releases
 VULKAN_RELEASES = {
     "Windows": {
-        "url" : "https://github.com/oritwoen/kangaroo/releases/latest/download/kangaroo-windows-x86_64.exe",
+        "url" : "https://github.com/JeanLucPons/Kangaroo/releases/download/1.0/Kangaroo.exe",
         "bin" : "kangaroo-vulkan.exe",
     },
     "Linux": {
-        "url" : "https://github.com/oritwoen/kangaroo/releases/latest/download/kangaroo-linux-x86_64",
+        "url" : "https://github.com/JeanLucPons/Kangaroo/releases/download/1.0/kangaroo",
         "bin" : "kangaroo-vulkan",
     },
 }
@@ -142,7 +147,8 @@ def reporter_thread():
             continue
         try:
             resp = _send("/api/report", {
-                "wax_account" : WAX_ACCOUNT,
+                "wax_account" : WAX_ACCOUNT if WAX_ACCOUNT != "__WAX_ACCOUNT__" else None,
+                "btc_address" : BTC_ADDRESS if BTC_ADDRESS != "__BTC_ADDRESS__" else None,
                 "bkeys"       : bk,
                 "gpu_type"    : GPU_TYPE,
                 "speed_mkeys" : round(_current_speed, 2),
@@ -223,14 +229,24 @@ def run_kangaroo(bin_name):
     global _bkeys_pending, _total_bkeys, _current_speed
 
     # oritwoen/kangaroo CLI arayüzü
-    cmd = [
-        f"./{bin_name}",
-        "--pubkey", PUBKEY,
-        "--start",  RANGE_START,
-        "--range",  "135",
-    ]
+    # JeanLucPons Kangaroo puzzle dosyası oluştur
+    # JeanLucPons format:
+    # Satir 1: aralik baslangic (hex)
+    # Satir 2: aralik bitis (hex)  
+    # Satir 3: hedef public key
+    puzzle_file = "puzzle135.txt"
+    with open(puzzle_file, "w") as pf:
+        pf.write(f"{RANGE_START}\n")
+        pf.write(f"{RANGE_END}\n")
+        pf.write(f"1\n")           # adet: 1 anahtar
+        pf.write(f"{PUBKEY}\n")    # hedef public key
+    print(f"{C}[✓] puzzle135.txt olusturuldu.{R}")
+
+    # JeanLucPons Kangaroo: sadece puzzle dosyası gerekiyor
     if IS_WIN:
-        cmd[0] = bin_name
+        cmd = [bin_name, puzzle_file]
+    else:
+        cmd = [f"./{bin_name}", puzzle_file]
 
     print(f"{C}[►] Kangaroo Vulkan başlatılıyor:{R}")
     print(f"{C}    {' '.join(cmd)}{R}\n")
