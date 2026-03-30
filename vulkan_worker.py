@@ -181,7 +181,7 @@ def run_kangaroo():
             if not line: continue
 
             # Hız
-            m=re.search(r'\[([\d.]+)\s*([MBGKk])Key/s\]',line,re.I)
+            m=re.search(r'\[([\d.]+)\s*([MBGKk])K?ey?/s\]',line,re.I)
             if m:
                 val=float(m.group(1)); unit=m.group(2).upper()
                 if unit=='K': val/=1000
