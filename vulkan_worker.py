@@ -251,17 +251,15 @@ def run_kangaroo(bin_name):
             cmd,
             stdout = subprocess.PIPE,
             stderr = subprocess.STDOUT,
-            text   = True,
-            bufsize= 1,
+            bufsize= 0,   # unbuffered
         )
     except FileNotFoundError:
         print(f"{RE}[✗] '{bin_name}' bulunamadı!{R}")
-        print(f"{Y}    Vulkan sürücüsü yüklü mü?")
-        print(f"    AMD: https://www.amd.com/tr/support")
-        print(f"    Intel Arc: https://www.intel.com/content/www/us/en/download-center/home.html{R}")
         return
 
-    for raw_line in proc.stdout:
+    import io
+    reader = io.TextIOWrapper(proc.stdout, encoding='utf-8', errors='replace', line_buffering=True)
+    for raw_line in reader:
         line = raw_line.strip()
         if not line:
             continue
