@@ -1,0 +1,25 @@
+# ENV — asla yükleme
+.env
+.env.local
+.env.production
+
+# Veritabanı
+*.db
+*.sqlite
+*.sqlite3
+
+# Node
+node_modules/
+npm-debug.log
+
+# Worker binary
+workers/dist/puzzle135-cuda-worker
+workers/dist/puzzle135-vulkan-worker
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+*.wasm
+*.abi
