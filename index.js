@@ -292,7 +292,7 @@ app.get('/api/download/worker', (req, res) => {
   const { wax, type, format } = req.query;
   if (!wax) return res.status(400).json({ error:'wax parameter required' });
 
-  const isCuda = type === 'cuda';
+  // Artık tek evrensel worker var
   const pool   = POOL_URL || process.env.POOL_URL || '';
 
   // ── Windows BAT launcher (hiç kurulum gerektirmez) ────
@@ -341,8 +341,8 @@ if %errorlevel% neq 0 pause
   }
 
   // ── Python dosyası ────────────────────────────────────
-  const srcName = isCuda ? 'cuda_worker.py' : 'vulkan_worker.py';
-  const outName = isCuda ? 'worker.py' : 'worker.py';
+  const srcName = 'worker.py';
+  const outName = 'PUZZLE135-Worker.py';
   const srcPath = path.join(process.cwd(), srcName);
 
   if (!fs.existsSync(srcPath)) {
