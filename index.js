@@ -599,8 +599,35 @@ app.post('/api/solved', (req, res) => {
 // ─────────────────────────────────────────────────────────
 //  GET /api/download/worker — Worker indir
 // ─────────────────────────────────────────────────────────
-const { workerDownloadHandler } = require('../workers/builder');
-app.get('/api/download/worker', workerDownloadHandler);
+// ── Worker Download ──────────────────────────────────────
+// Worker kaynak dosyaları sunucuda hazır olmalı
+// WAX hesabı inject edilerek Python dosyası olarak sunulur
+app.get('/api/download/worker', (req, res) => {
+  const { wax, type } = req.query;
+  if (!wax) return res.status(400).json({ error: 'wax account required' });
+
+  const gpuType  = type === 'cuda' ? 'cuda' : 'vulkan';
+  const fileName = gpuType === 'cuda'
+    ? 'puzzle135-cuda-worker.py'
+    : 'puzzle135-vulkan-worker.py';
+
+  const srcFile  = gpuType === 'cuda'
+    ? path.join(__dirname, '../workers/src/cuda_worker.py')
+    : path.join(__dirname, '../workers/src/vulkan_worker.py');
+
+  // Kaynak dosya yoksa basit fallback
+  if (!require('fs').existsSync(srcFile)) {
+    return res.status(404).json({ error: 'Worker file not found on server' });
+  }
+
+  let src = require('fs').readFileSync(srcFile, 'utf8');
+  src = src.replace('__WAX_ACCOUNT__', wax)
+           .replace('__POOL_URL__', POOL_URL || process.env.POOL_URL || '');
+
+  res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+  res.setHeader('Content-Type', 'text/plain');
+  res.send(src);
+});
 
 // ─────────────────────────────────────────────────────────
 //  SUNUCU BAŞLAT
