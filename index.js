@@ -359,6 +359,26 @@ if %errorlevel% neq 0 pause
   res.send(src);
 });
 
+// ── GET /api/download/setup — GPU Setup BAT ─────────────────
+app.get('/api/download/setup', (req, res) => {
+  const { wax } = req.query;
+  if (!wax) return res.status(400).json({ error: 'wax parameter required' });
+
+  const batPath = path.join(process.cwd(), 'PUZZLE135-GPU-Setup.bat');
+  if (!fs.existsSync(batPath)) {
+    return res.status(404).json({ error: 'Setup file not found' });
+  }
+
+  let bat = fs.readFileSync(batPath, 'utf8');
+  // WAX hesabını inject et
+  bat = bat.replace(/__WAX__/g, wax)
+           .replace(/__POOL_URL__/g, POOL_URL);
+
+  res.setHeader('Content-Disposition', 'attachment; filename="PUZZLE135-GPU-Setup.bat"');
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.send(bat);
+});
+
 // ── STATIC ────────────────────────────────────────────────
 const publicDir = path.join(process.cwd(), 'public');
 if (fs.existsSync(publicDir)) app.use(express.static(publicDir));
