@@ -28,7 +28,7 @@ const ADMIN_ACCOUNT = process.env.ADMIN_ACCOUNT  || 'puzzle135btc';
 const ADMIN_KEY     = process.env.ADMIN_KEY      || 'changeme';
 const ADMIN_PRIVKEY = process.env.ADMIN_PRIVATE_KEY || '';
 const POOL_URL      = process.env.POOL_URL       || '';
-const NFT_THRESHOLD = 10;
+const NFT_THRESHOLD = 10000;
 
 const rpc = new JsonRpc('https://wax.greymass.com', { fetch });
 const api = ADMIN_PRIVKEY ? new Api({
