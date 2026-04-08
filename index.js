@@ -244,6 +244,40 @@ async function mintOnChain(waxAccount, bkeys, nfts) {
   return r.transaction_id;
 }
 
+// ── POST /api/register — Yeni kullanıcı kaydı ────────────
+// Frontend bağlandığında çağrılır; kayıt yoksa oluşturur
+app.post('/api/register', (req, res) => {
+  const { wax_account } = req.body;
+  if (!wax_account || typeof wax_account !== 'string')
+    return res.status(400).json({ error: 'wax_account required' });
+
+  // Zaten varsa dokunma, yoksa sıfırdan oluştur
+  const existing = getContrib.get(wax_account);
+  if (!existing) {
+    saveContrib.run({
+      wax_account,
+      bkeys_total : 0,
+      nfts_minted : 0,
+      last_seen   : Date.now(),
+      gpu_type    : 'unknown'
+    });
+    console.log(`[REGISTER] Yeni kullanıcı: ${wax_account}`);
+  }
+
+  const c     = getContrib.get(wax_account);
+  const pool  = getPool.get();
+  const total = pool.total_nfts || 1;
+  res.json({
+    ok          : true,
+    wax_account,
+    nft_count   : c.nfts_minted,
+    bkeys_total : c.bkeys_total,
+    bkeys_until_next_nft: NFT_THRESHOLD - (c.bkeys_total % NFT_THRESHOLD),
+    share_pct   : ((c.nfts_minted / total) * 100).toFixed(4),
+    is_new      : !existing
+  });
+});
+
 // ── GET /api/stats ────────────────────────────────────────
 app.get('/api/stats', (req, res) => {
   const pool   = getPool.get();
@@ -482,36 +516,11 @@ app.get('/api/prices', async (req, res) => {
     return res.json(priceCache.data);
   }
   try {
-    // CoinGecko demo API - rate limit aşılırsa alternatife geç
-    let data = null;
-    
-    // Önce CoinGecko dene
-    try {
-      const r1 = await fetch(
-        'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,wax&vs_currencies=usd&x_cg_demo_api_key=CG-demo',
-        { headers: { 'Accept': 'application/json' } }
-      );
-      data = await r1.json();
-      if (data.status?.error_code === 429) data = null;
-    } catch {}
-
-    // Alternatif: CoinPaprika (limit yok)
-    if (!data?.bitcoin) {
-      try {
-        const [btcR, waxR] = await Promise.all([
-          fetch('https://api.coinpaprika.com/v1/tickers/btc-bitcoin?quotes=USD'),
-          fetch('https://api.coinpaprika.com/v1/tickers/wax-wax?quotes=USD')
-        ]);
-        const btcD = await btcR.json();
-        const waxD = await waxR.json();
-        data = {
-          bitcoin: { usd: btcD.quotes?.USD?.price || 95000 },
-          wax    : { usd: waxD.quotes?.USD?.price || 0.05 }
-        };
-      } catch {}
-    }
-
-    if (!data) data = { bitcoin:{usd:95000}, wax:{usd:0.05} };
+    const r = await fetch(
+      'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,wax&vs_currencies=usd',
+      { headers: { 'Accept': 'application/json' }, timeout: 8000 }
+    );
+    const data = await r.json();
     priceCache = { data, ts: Date.now() };
     res.json(data);
   } catch(e) {
